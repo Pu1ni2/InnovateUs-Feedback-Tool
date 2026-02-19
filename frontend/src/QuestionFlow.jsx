@@ -1,132 +1,185 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { getQuestions, voiceSubmit, textSubmit, playBase64Audio } from './api'
+import {
+  createSession, voiceSubmit, textSubmit, speakText,
+  playBase64Audio, checkCovered,
+} from './api'
 import VoiceRecorder from './VoiceRecorder'
 import './QuestionFlow.css'
 
 const MAX_FOLLOWUPS = 2
 
 export default function QuestionFlow({ mode, onComplete }) {
+  const [sessionId, setSessionId] = useState('')
   const [questions, setQuestions] = useState([])
+  const [intros, setIntros] = useState([])
   const [qIndex, setQIndex] = useState(0)
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
+  const [speaking, setSpeaking] = useState(false)
   const [error, setError] = useState(null)
 
-  // Per-question state
   const [followUpCount, setFollowUpCount] = useState(0)
-  const [followUpText, setFollowUpText] = useState('')
-  const [fullResponse, setFullResponse] = useState('')
-  const [transcript, setTranscript] = useState('')
   const [textInput, setTextInput] = useState('')
   const [results, setResults] = useState([])
-
-  // Conversation log for display
   const [conversation, setConversation] = useState([])
 
   const chatEndRef = useRef(null)
+  const mountedRef = useRef(true)
 
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [conversation])
+
+  /* ── Speak helper (non-blocking TTS) ──────────────── */
+  const speak = useCallback(async (text) => {
+    if (!mountedRef.current || mode !== 'voice') return
+    setSpeaking(true)
+    try {
+      const audio = await speakText(text)
+      if (audio && mountedRef.current) await playBase64Audio(audio)
+    } catch (_) {}
+    if (mountedRef.current) setSpeaking(false)
+  }, [mode])
+
+  /* ── Initialize session ───────────────────────────── */
   useEffect(() => {
-    getQuestions()
-      .then((q) => { setQuestions(q); setConversation([{ role: 'ai', text: q[0] }]) })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [])
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await createSession()
+        if (cancelled) return
+        setSessionId(data.session_id)
+        setQuestions(data.questions)
+        setIntros(data.spoken_intros || [])
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [conversation])
+        const firstIntro = (data.spoken_intros && data.spoken_intros[0]) || data.questions[0]
+        setConversation([{ role: 'ai', text: firstIntro }])
 
-  const mainQ = questions[qIndex]
-  const isLast = qIndex >= questions.length - 1
-  const progress = questions.length ? ((qIndex + (followUpCount > 0 ? 0.5 : 0)) / questions.length) * 100 : 0
+        // Text appears immediately; TTS plays in parallel (not blocking)
+        if (mode === 'voice') speak(firstIntro)
+      } catch (e) {
+        if (!cancelled) setError(e.message)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const advanceOrFinish = useCallback((newResults) => {
+  const progress = questions.length
+    ? ((qIndex + (followUpCount > 0 ? 0.5 : 0)) / questions.length) * 100
+    : 0
+
+  /* ── Advance to next question ─────────────────────── */
+  const advanceOrFinish = useCallback(async (newResults, coveredFuture = []) => {
     setFollowUpCount(0)
-    setFollowUpText('')
-    setFullResponse('')
-    setTranscript('')
     setTextInput('')
 
-    if (isLast) {
-      onComplete(newResults)
-    } else {
-      const nextQ = questions[qIndex + 1]
-      setQIndex(i => i + 1)
-      setConversation(prev => [...prev, { role: 'ai', text: nextQ }])
-    }
-  }, [isLast, questions, qIndex, onComplete])
+    let nextIdx = qIndex + 1
 
+    // Skip questions marked as covered by the AI
+    while (nextIdx < questions.length) {
+      const isCovered = coveredFuture.includes(nextIdx) || await checkCovered(sessionId, nextIdx)
+      if (!isCovered) break
+      setConversation(prev => [...prev, {
+        role: 'ai',
+        text: `It sounds like you already covered question ${nextIdx + 1}. Skipping ahead.`,
+        isSkip: true,
+      }])
+      nextIdx++
+    }
+
+    if (nextIdx >= questions.length) {
+      onComplete(newResults)
+      return
+    }
+
+    const intro = intros[nextIdx] || questions[nextIdx]
+    setQIndex(nextIdx)
+    setConversation(prev => [...prev, { role: 'ai', text: intro }])
+    if (mode === 'voice') speak(intro)
+  }, [qIndex, questions, intros, sessionId, onComplete, mode, speak])
+
+  /* ── Process analysis result (shared by voice & text) */
+  const handleAnalysis = useCallback(async (result, transcript) => {
+    const { status, follow_up, follow_up_audio, transition_text, transition_audio,
+            summary, covered_future_indices, structured } = result
+
+    if (transcript) {
+      setConversation(prev => [...prev, { role: 'user', text: transcript }])
+    }
+
+    if (status === 'needs_follow_up' && follow_up) {
+      setFollowUpCount(c => c + 1)
+      setConversation(prev => [...prev, { role: 'ai', text: follow_up, isFollowUp: true }])
+      setProcessing(false)
+
+      if (follow_up_audio) {
+        setSpeaking(true)
+        try { await playBase64Audio(follow_up_audio) } catch (_) {}
+        if (mountedRef.current) setSpeaking(false)
+      } else if (mode === 'voice') {
+        await speak(follow_up)
+      }
+      return
+    }
+
+    // done / move_on / already_covered → show transition, extract, advance
+    if (transition_text) {
+      setConversation(prev => [...prev, { role: 'ai', text: transition_text, isTransition: true }])
+    }
+    if (transition_audio) {
+      setSpeaking(true)
+      try { await playBase64Audio(transition_audio) } catch (_) {}
+      if (mountedRef.current) setSpeaking(false)
+    }
+
+    const newResults = [...results, {
+      question: questions[qIndex],
+      summary: summary || transcript,
+      structured: structured,
+    }]
+    setResults(newResults)
+    setProcessing(false)
+    await advanceOrFinish(newResults, covered_future_indices || [])
+  }, [results, questions, qIndex, advanceOrFinish, mode, speak])
+
+  /* ── Voice blob handler ───────────────────────────── */
   const handleVoiceBlob = useCallback(async (blob) => {
-    if (!mainQ) return
     setProcessing(true)
     setError(null)
-
     try {
-      const result = await voiceSubmit(blob, mainQ, fullResponse, followUpCount)
-
-      if (!result.transcript && !result.done) {
+      const result = await voiceSubmit(blob, sessionId, qIndex, followUpCount)
+      if (!result.transcript) {
         setError('Could not understand audio. Please speak clearly and try again.')
         setProcessing(false)
         return
       }
-
-      if (result.transcript) {
-        setTranscript(result.transcript)
-        setConversation(prev => [...prev, { role: 'user', text: result.transcript }])
-      }
-
-      const combined = result.combined_response || fullResponse
-      setFullResponse(combined)
-
-      if (!result.done && result.is_vague && result.follow_up) {
-        setFollowUpText(result.follow_up)
-        setFollowUpCount(c => c + 1)
-        setConversation(prev => [...prev, { role: 'ai', text: result.follow_up, isFollowUp: true }])
-
-        if (result.follow_up_audio) {
-          try { await playBase64Audio(result.follow_up_audio) } catch (_) {}
-        }
-      } else {
-        const newResults = [...results, { question: mainQ, fullResponse: combined, structured: result.structured }]
-        setResults(newResults)
-        advanceOrFinish(newResults)
-      }
+      await handleAnalysis(result, result.transcript)
     } catch (e) {
       setError(e.message || 'Something went wrong. Please try again.')
-    } finally {
       setProcessing(false)
     }
-  }, [mainQ, fullResponse, followUpCount, results, advanceOrFinish])
+  }, [sessionId, qIndex, followUpCount, handleAnalysis])
 
+  /* ── Text submit handler ──────────────────────────── */
   const handleTextSubmit = useCallback(async () => {
     const text = textInput.trim()
-    if (!text || !mainQ) return
+    if (!text) return
     setProcessing(true)
     setError(null)
     setConversation(prev => [...prev, { role: 'user', text }])
     setTextInput('')
 
     try {
-      const result = await textSubmit(mainQ, text, fullResponse, followUpCount)
-      const combined = result.combined_response || fullResponse
-      setFullResponse(combined)
-
-      if (!result.done && result.is_vague && result.follow_up) {
-        setFollowUpText(result.follow_up)
-        setFollowUpCount(c => c + 1)
-        setConversation(prev => [...prev, { role: 'ai', text: result.follow_up, isFollowUp: true }])
-      } else {
-        const newResults = [...results, { question: mainQ, fullResponse: combined, structured: result.structured }]
-        setResults(newResults)
-        advanceOrFinish(newResults)
-      }
+      const result = await textSubmit(sessionId, qIndex, text, followUpCount)
+      await handleAnalysis(result, null)
     } catch (e) {
       setError(e.message || 'Something went wrong. Please try again.')
-    } finally {
       setProcessing(false)
     }
-  }, [textInput, mainQ, fullResponse, followUpCount, results, advanceOrFinish])
+  }, [textInput, sessionId, qIndex, followUpCount, handleAnalysis])
 
+  /* ── Render ───────────────────────────────────────── */
   if (loading) {
     return (
       <div className="glass-card qf-loading">
@@ -136,13 +189,12 @@ export default function QuestionFlow({ mode, onComplete }) {
     )
   }
 
-  if (error && !mainQ) {
+  if (error && !questions.length) {
     return <div className="glass-card qf-error-card">{error}</div>
   }
 
   return (
     <div className="glass-card qf-card">
-      {/* Progress header */}
       <div className="qf-header">
         <div className="qf-progress-row">
           <span className="qf-step-label">Question {qIndex + 1} of {questions.length}</span>
@@ -155,10 +207,9 @@ export default function QuestionFlow({ mode, onComplete }) {
         </div>
       </div>
 
-      {/* Conversation */}
       <div className="qf-conversation">
         {conversation.map((msg, i) => (
-          <div key={i} className={`qf-msg qf-msg-${msg.role} ${msg.isFollowUp ? 'qf-msg-followup' : ''}`}>
+          <div key={i} className={`qf-msg qf-msg-${msg.role} ${msg.isFollowUp ? 'qf-msg-followup' : ''} ${msg.isSkip || msg.isTransition ? 'qf-msg-transition' : ''}`}>
             {msg.role === 'ai' && (
               <div className="qf-msg-avatar">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -167,7 +218,8 @@ export default function QuestionFlow({ mode, onComplete }) {
               </div>
             )}
             <div className="qf-msg-bubble">
-              {msg.isFollowUp && <span className="qf-fu-tag">AI Follow-up</span>}
+              {msg.isFollowUp && <span className="qf-fu-tag">Follow-up</span>}
+              {(msg.isSkip || msg.isTransition) && <span className="qf-skip-tag">Transition</span>}
               <p>{msg.text}</p>
             </div>
           </div>
@@ -175,23 +227,20 @@ export default function QuestionFlow({ mode, onComplete }) {
         <div ref={chatEndRef} />
       </div>
 
-      {/* Error */}
       {error && <div className="qf-error">{error}</div>}
 
-      {/* Input area */}
       <div className="qf-input-area">
         {mode === 'voice' ? (
           <VoiceRecorder
-            key={`v-${qIndex}-${followUpCount}`}
             onAudioReady={handleVoiceBlob}
             isProcessing={processing}
-            disabled={processing}
+            isSpeaking={speaking}
           />
         ) : (
           <div className="qf-text-input">
             <textarea
               className="qf-textarea"
-              placeholder={followUpText ? 'Type your follow-up response…' : 'Type your response…'}
+              placeholder="Type your response…"
               value={textInput}
               onChange={e => setTextInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleTextSubmit() } }}

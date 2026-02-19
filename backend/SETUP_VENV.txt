@@ -1,0 +1,6 @@
+To fix the pydantic-core install error:
+1. Install Python 3.12 from https://www.python.org/downloads/ or run: winget install Python.Python.3.12
+2. Open a new terminal, then: cd backend
+3. Run: py -3.12 -m venv .venv
+4. Run: .venv\Scripts\activate
+5. Run: pip install -r requirements.txt

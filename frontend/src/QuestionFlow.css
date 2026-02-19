@@ -139,14 +139,22 @@
   border: 1px solid rgba(245, 158, 11, 0.25);
 }
 
-.qf-fu-tag {
+.qf-fu-tag, .qf-skip-tag {
   display: inline-block;
   font-size: 0.7rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--warning);
   margin-bottom: 0.3rem;
+}
+
+.qf-fu-tag { color: var(--warning); }
+.qf-skip-tag { color: #8b5cf6; }
+
+.qf-msg-transition .qf-msg-bubble {
+  background: rgba(139, 92, 246, 0.08);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  font-style: italic;
 }
 
 .qf-msg-bubble p {

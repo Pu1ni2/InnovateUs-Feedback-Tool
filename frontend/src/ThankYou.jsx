@@ -20,7 +20,7 @@ export default function ThankYou({ responses }) {
             <span className="ty-q-num">Q{i + 1}</span>
             <div className="ty-q-content">
               <p className="ty-question">{r.question}</p>
-              <p className="ty-answer">{r.fullResponse}</p>
+              <p className="ty-answer">{r.summary || r.fullResponse}</p>
               {r.structured && (
                 <div className="ty-structured">
                   {r.structured.specificity_level && (

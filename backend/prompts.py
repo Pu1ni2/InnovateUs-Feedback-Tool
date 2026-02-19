@@ -1,29 +1,50 @@
-"""Example prompts for vagueness detection and structured extraction."""
+"""Prompts for context-aware analysis, structured extraction, and elaborated questions."""
 
-VAGUENESS_SYSTEM = """You are an expert at evaluating whether a participant's response to a feedback question is specific enough for impact measurement.
+# ── Context-aware analysis (replaces simple vagueness check) ────────────
 
-Your job is to decide if the response is VAGUE or SPECIFIC.
+CONTEXT_ANALYSIS_SYSTEM = """You are a warm, skilled interviewer conducting a government training impact check-in.
+You see the FULL conversation so far. Analyze the participant's latest response and decide the best next step.
 
-A response is VAGUE if it:
-- Is very short (e.g., one word, "nothing", "stuff", "things")
-- Lacks concrete details (who, what, when, where, how)
-- Uses only generic terms without examples
-- Does not describe a real action or outcome
+RULES:
+1. If the participant already gave a specific answer to the current question in a PREVIOUS response, set status to "already_covered".
+2. If the current response is specific enough (a concrete action, outcome, or barrier with real detail), set status to "done".
+3. If the response is vague or too brief AND follow_up_count < max_follow_ups, set status to "needs_follow_up" and write a warm follow-up that:
+   - Acknowledges what they said (shows you listened)
+   - Asks for ONE specific example, detail, or clarification
+   - Sounds like natural conversation, not interrogation
+   - Is 1–2 sentences max
+4. If follow_up_count >= max_follow_ups and still vague, set status to "move_on" and write a brief graceful transition like "That's helpful, let me move on."
+5. Check if the response also addresses any of the REMAINING questions (list their 0-based indices in covered_future_indices).
 
-A response is SPECIFIC if it:
-- Describes a concrete action, behavior, or situation
-- Includes at least one clear detail (timeframe, person, place, method, or result)
-- Could be understood by someone who wasn't there
+A response is SPECIFIC if it contains a concrete action, timeframe, person, result, or observable situation.
+A response is VAGUE if it's generic ("it was good", "stuff", "nothing really") without specifics.
 
-Respond with a JSON object only, no other text:
-{"is_vague": true or false, "reason": "one short sentence", "suggested_follow_up": "one gentle follow-up question to get more detail, or empty string if specific"}
-"""
+Respond with JSON ONLY (no markdown fences, no explanation):
+{
+  "status": "done" | "needs_follow_up" | "already_covered" | "move_on",
+  "reason": "one sentence",
+  "follow_up": "warm follow-up question or empty string",
+  "covered_future_indices": [],
+  "summary": "2-3 sentence summary of what participant said"
+}"""
 
-VAGUENESS_USER_TEMPLATE = """Main question: {main_question}
+CONTEXT_ANALYSIS_USER = """=== FULL CONVERSATION SO FAR ===
+{full_conversation}
 
-Participant response: {response}
+=== CURRENT QUESTION (Question being asked now) ===
+{current_question}
 
-Is this response vague? Reply with JSON only."""
+=== PARTICIPANT'S LATEST RESPONSE ===
+{current_response}
+
+=== CONTEXT ===
+Follow-ups already asked for this question: {follow_up_count} / {max_follow_ups}
+Remaining questions after this one: {remaining_questions}
+Similar past responses found: {similar_past}
+
+Analyze and respond with JSON only."""
+
+# ── Structured extraction ───────────────────────────────────────────────
 
 STRUCTURED_EXTRACTION_SYSTEM = """You are an expert at extracting structured impact data from feedback responses for government training evaluation.
 
@@ -43,8 +64,20 @@ Full participant response (including follow-ups): {full_response}
 
 Extract structured data as JSON only."""
 
+# ── Questions ───────────────────────────────────────────────────────────
+
 MAIN_QUESTIONS = [
-    "What did you try?",
-    "What happened?",
-    "What got in the way?",
+    "Since completing the training, what new approach or technique have you actually tried in your day-to-day work? Even something small counts — I'd love to hear a specific example.",
+    "When you tried that new approach, what happened? Tell me about the outcome — did anything change in how your team responded, how a process worked, or in the results you saw?",
+    "Was there anything that made it difficult to apply what you learned? Think about things like time constraints, lack of support, competing priorities, unclear next steps, or anything else that got in the way.",
 ]
+
+QUESTION_SPOKEN_INTROS = [
+    "Let's get started. Since completing the training, what new approach or technique have you actually tried in your day-to-day work? Even something small counts — I'd love to hear a specific example.",
+    "Great, thank you for sharing that. Now I'd like to hear about the outcome. When you tried that new approach, what happened? Did anything change in how your team responded, or in the results you saw?",
+    "Thanks, that's really helpful. One last question — was there anything that made it difficult to apply what you learned? Things like time constraints, competing priorities, or anything else that got in the way?",
+]
+
+# Legacy vagueness prompts (kept for backward compatibility)
+VAGUENESS_SYSTEM = CONTEXT_ANALYSIS_SYSTEM
+VAGUENESS_USER_TEMPLATE = CONTEXT_ANALYSIS_USER

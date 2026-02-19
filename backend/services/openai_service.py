@@ -1,4 +1,4 @@
-"""OpenAI service: Whisper STT, vagueness detection, structured extraction, and TTS."""
+"""OpenAI service: Whisper STT, TTS, and structured extraction."""
 import base64
 import io
 import json
@@ -12,8 +12,6 @@ from config import settings
 from prompts import (
     STRUCTURED_EXTRACTION_SYSTEM,
     STRUCTURED_EXTRACTION_USER_TEMPLATE,
-    VAGUENESS_SYSTEM,
-    VAGUENESS_USER_TEMPLATE,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,7 +20,6 @@ _client = None
 
 
 def get_client() -> OpenAI:
-    """Get or create the OpenAI client. Raises RuntimeError if no API key."""
     global _client
     if _client is not None:
         return _client
@@ -38,7 +35,6 @@ def get_client() -> OpenAI:
 
 
 def _clean_json(text: str) -> str:
-    """Strip markdown code fences if the model wraps JSON in them."""
     text = text.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
@@ -46,7 +42,6 @@ def _clean_json(text: str) -> str:
 
 
 def transcribe_audio(audio_bytes: bytes, filename: str = "audio.webm") -> str:
-    """Transcribe audio using Whisper. Audio is discarded after this call."""
     client = get_client()
     buf = io.BytesIO(audio_bytes)
     buf.name = filename
@@ -61,7 +56,6 @@ def transcribe_audio(audio_bytes: bytes, filename: str = "audio.webm") -> str:
 
 
 def text_to_speech(text: str) -> str:
-    """Convert text to speech using OpenAI TTS. Returns base64-encoded mp3."""
     client = get_client()
     if not text:
         return ""
@@ -77,33 +71,7 @@ def text_to_speech(text: str) -> str:
     return base64.b64encode(audio_bytes).decode("utf-8")
 
 
-def check_vagueness(main_question: str, response: str) -> dict[str, Any]:
-    """Use AI to detect if response is vague; return follow-up suggestion."""
-    client = get_client()
-    user_msg = VAGUENESS_USER_TEMPLATE.format(
-        main_question=main_question,
-        response=response or "(no response)",
-    )
-    logger.info("Checking vagueness for: %s", response[:60] if response else "(empty)")
-    resp = client.chat.completions.create(
-        model=settings.openai_vagueness_model,
-        messages=[
-            {"role": "system", "content": VAGUENESS_SYSTEM},
-            {"role": "user", "content": user_msg},
-        ],
-        response_format={"type": "json_object"},
-        max_tokens=300,
-        temperature=0.3,
-    )
-    text = _clean_json(resp.choices[0].message.content or "{}")
-    result = json.loads(text)
-    logger.info("Vagueness result: is_vague=%s, follow_up=%s",
-                result.get("is_vague"), (result.get("suggested_follow_up") or "")[:40])
-    return result
-
-
 def extract_structured(main_question: str, full_response: str) -> dict[str, Any]:
-    """Use AI to extract structured impact data from the full conversation."""
     client = get_client()
     user_msg = STRUCTURED_EXTRACTION_USER_TEMPLATE.format(
         main_question=main_question,

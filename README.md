@@ -28,14 +28,26 @@ AI-powered **voice-to-voice** and text feedback tool that measures behavior chan
 
 ### 1. Backend
 
-**Requires Python 3.11 or 3.12.** (Python 3.14 is not yet supported by pydantic-core wheels and will fail to install.)
+**Requires Python 3.11 or 3.12.** (Python 3.14 has no pydantic-core wheels and will fail unless Cargo is on PATH.)
+
+**Quick fix (Windows):** Install Python 3.12, then in a new terminal:
+
+```powershell
+cd backend
+py -3.12 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+Install Python 3.12: `winget install Python.Python.3.12` (then close and reopen the terminal). If you must use Python 3.14, install Rust from https://rustup.rs so Cargo is on PATH, then create the venv and run pip install.
+
+**Manual steps:**
 
 ```bash
 cd backend
-# Use Python 3.11 or 3.12 for the venv (e.g. on Windows with the py launcher):
+# Use Python 3.11 or 3.12 for the venv (e.g. on Windows):
 py -3.12 -m venv .venv
-# Or, if your default python is already 3.11/3.12:
-# python -m venv .venv
+# macOS/Linux may need: python3.12 -m venv .venv
 
 # Windows:
 .venv\Scripts\activate

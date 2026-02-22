@@ -1,27 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  createSession, voiceSubmit, textSubmit, speakText,
-  playBase64Audio, checkCovered,
+  createSession, textSubmit, checkCovered, playBase64Audio,
 } from './api'
-import VoiceRecorder from './VoiceRecorder'
+import RealtimeVoice from './RealtimeVoice'
 import './QuestionFlow.css'
 
 const MAX_FOLLOWUPS = 2
 
-export default function QuestionFlow({ mode, onComplete }) {
+export default function QuestionFlow({ onComplete }) {
   const [sessionId, setSessionId] = useState('')
   const [questions, setQuestions] = useState([])
-  const [intros, setIntros] = useState([])
   const [qIndex, setQIndex] = useState(0)
   const [loading, setLoading] = useState(true)
   const [processing, setProcessing] = useState(false)
-  const [speaking, setSpeaking] = useState(false)
   const [error, setError] = useState(null)
-
   const [followUpCount, setFollowUpCount] = useState(0)
   const [textInput, setTextInput] = useState('')
   const [results, setResults] = useState([])
   const [conversation, setConversation] = useState([])
+  const [completedQs, setCompletedQs] = useState(new Set())
+  const [voiceActive, setVoiceActive] = useState(false)
 
   const chatEndRef = useRef(null)
   const mountedRef = useRef(true)
@@ -29,18 +27,6 @@ export default function QuestionFlow({ mode, onComplete }) {
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [conversation])
 
-  /* ── Speak helper (non-blocking TTS) ──────────────── */
-  const speak = useCallback(async (text) => {
-    if (!mountedRef.current || mode !== 'voice') return
-    setSpeaking(true)
-    try {
-      const audio = await speakText(text)
-      if (audio && mountedRef.current) await playBase64Audio(audio)
-    } catch (_) {}
-    if (mountedRef.current) setSpeaking(false)
-  }, [mode])
-
-  /* ── Initialize session ───────────────────────────── */
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -49,13 +35,8 @@ export default function QuestionFlow({ mode, onComplete }) {
         if (cancelled) return
         setSessionId(data.session_id)
         setQuestions(data.questions)
-        setIntros(data.spoken_intros || [])
-
         const firstIntro = (data.spoken_intros && data.spoken_intros[0]) || data.questions[0]
         setConversation([{ role: 'ai', text: firstIntro }])
-
-        // Text appears immediately; TTS plays in parallel (not blocking)
-        if (mode === 'voice') speak(firstIntro)
       } catch (e) {
         if (!cancelled) setError(e.message)
       } finally {
@@ -63,20 +44,97 @@ export default function QuestionFlow({ mode, onComplete }) {
       }
     })()
     return () => { cancelled = true }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   const progress = questions.length
-    ? ((qIndex + (followUpCount > 0 ? 0.5 : 0)) / questions.length) * 100
+    ? (Math.max(completedQs.size, qIndex) / questions.length) * 100
     : 0
 
-  /* ── Advance to next question ─────────────────────── */
+  const questionsRef = useRef(questions)
+  useEffect(() => { questionsRef.current = questions }, [questions])
+
+  /* ── Voice callbacks ─────────────────────────────────── */
+  const onUserTranscript = useCallback((text) => {
+    setConversation(prev => [...prev, { role: 'user', text }])
+  }, [])
+
+  const detectQuestionIndex = useCallback((transcript) => {
+    const lower = transcript.toLowerCase()
+    const qs = questionsRef.current
+    if (!qs.length) return -1
+    const markers = [
+      ['new approach', 'technique', 'actually tried'],
+      ['what happened', 'outcome', 'team responded'],
+      ['difficult', 'got in the way', 'competing priorities'],
+    ]
+    for (let i = markers.length - 1; i >= 0; i--) {
+      if (i < qs.length && markers[i].some(m => lower.includes(m))) return i
+    }
+    return -1
+  }, [])
+
+  const onAITranscript = useCallback((text) => {
+    setConversation(prev => [...prev, { role: 'ai', text }])
+    const detected = detectQuestionIndex(text)
+    if (detected >= 0) {
+      setQIndex(prev => Math.max(prev, detected))
+    }
+  }, [detectQuestionIndex])
+
+  const onQuestionDone = useCallback((idx, summary) => {
+    setCompletedQs(prev => {
+      const next = new Set(prev)
+      next.add(idx)
+      return next
+    })
+    setResults(prev => {
+      const updated = [...prev]
+      const exists = updated.find(r => r.questionIndex === idx)
+      if (!exists) {
+        updated.push({
+          questionIndex: idx,
+          question: questionsRef.current[idx] || `Question ${idx + 1}`,
+          summary,
+        })
+      }
+      return updated
+    })
+    setQIndex(idx + 1)
+    setFollowUpCount(0)
+  }, [])
+
+  const onCheckInComplete = useCallback((summaries) => {
+    const qs = questionsRef.current
+    const finalResults = (summaries || []).map((s, i) => ({
+      questionIndex: i,
+      question: qs[i] || `Question ${i + 1}`,
+      summary: s,
+    }))
+    setVoiceActive(false)
+    setTimeout(() => onComplete(finalResults.length ? finalResults : results), 1500)
+  }, [results, onComplete])
+
+  const onVoiceDisconnect = useCallback((lastCompletedQ) => {
+    if (lastCompletedQ >= 0) {
+      const maxQ = questionsRef.current.length - 1
+      setQIndex(prev => {
+        const nextQ = Math.min(lastCompletedQ + 1, maxQ)
+        return nextQ > prev ? nextQ : prev
+      })
+    }
+  }, [])
+
+  const onVoiceError = useCallback((msg) => {
+    setError(msg)
+    setTimeout(() => { if (mountedRef.current) setError(null) }, 5000)
+  }, [])
+
+  /* ── Text advance/finish ─────────────────────────────── */
   const advanceOrFinish = useCallback(async (newResults, coveredFuture = []) => {
     setFollowUpCount(0)
     setTextInput('')
 
     let nextIdx = qIndex + 1
-
-    // Skip questions marked as covered by the AI
     while (nextIdx < questions.length) {
       const isCovered = coveredFuture.includes(nextIdx) || await checkCovered(sessionId, nextIdx)
       if (!isCovered) break
@@ -85,6 +143,7 @@ export default function QuestionFlow({ mode, onComplete }) {
         text: `It sounds like you already covered question ${nextIdx + 1}. Skipping ahead.`,
         isSkip: true,
       }])
+      setCompletedQs(prev => { const n = new Set(prev); n.add(nextIdx); return n })
       nextIdx++
     }
 
@@ -93,13 +152,14 @@ export default function QuestionFlow({ mode, onComplete }) {
       return
     }
 
-    const intro = intros[nextIdx] || questions[nextIdx]
     setQIndex(nextIdx)
-    setConversation(prev => [...prev, { role: 'ai', text: intro }])
-    if (mode === 'voice') speak(intro)
-  }, [qIndex, questions, intros, sessionId, onComplete, mode, speak])
+    setConversation(prev => [...prev, {
+      role: 'ai',
+      text: questions[nextIdx],
+    }])
+  }, [qIndex, questions, sessionId, onComplete])
 
-  /* ── Process analysis result (shared by voice & text) */
+  /* ── Process text analysis ───────────────────────────── */
   const handleAnalysis = useCallback(async (result, transcript) => {
     const { status, follow_up, follow_up_audio, transition_text, transition_audio,
             summary, covered_future_indices, structured } = result
@@ -112,56 +172,32 @@ export default function QuestionFlow({ mode, onComplete }) {
       setFollowUpCount(c => c + 1)
       setConversation(prev => [...prev, { role: 'ai', text: follow_up, isFollowUp: true }])
       setProcessing(false)
-
       if (follow_up_audio) {
-        setSpeaking(true)
         try { await playBase64Audio(follow_up_audio) } catch (_) {}
-        if (mountedRef.current) setSpeaking(false)
-      } else if (mode === 'voice') {
-        await speak(follow_up)
       }
       return
     }
 
-    // done / move_on / already_covered → show transition, extract, advance
     if (transition_text) {
       setConversation(prev => [...prev, { role: 'ai', text: transition_text, isTransition: true }])
     }
     if (transition_audio) {
-      setSpeaking(true)
       try { await playBase64Audio(transition_audio) } catch (_) {}
-      if (mountedRef.current) setSpeaking(false)
     }
 
+    setCompletedQs(prev => { const n = new Set(prev); n.add(qIndex); return n })
     const newResults = [...results, {
+      questionIndex: qIndex,
       question: questions[qIndex],
       summary: summary || transcript,
-      structured: structured,
+      structured,
     }]
     setResults(newResults)
     setProcessing(false)
     await advanceOrFinish(newResults, covered_future_indices || [])
-  }, [results, questions, qIndex, advanceOrFinish, mode, speak])
+  }, [results, questions, qIndex, advanceOrFinish])
 
-  /* ── Voice blob handler ───────────────────────────── */
-  const handleVoiceBlob = useCallback(async (blob) => {
-    setProcessing(true)
-    setError(null)
-    try {
-      const result = await voiceSubmit(blob, sessionId, qIndex, followUpCount)
-      if (!result.transcript) {
-        setError('Could not understand audio. Please speak clearly and try again.')
-        setProcessing(false)
-        return
-      }
-      await handleAnalysis(result, result.transcript)
-    } catch (e) {
-      setError(e.message || 'Something went wrong. Please try again.')
-      setProcessing(false)
-    }
-  }, [sessionId, qIndex, followUpCount, handleAnalysis])
-
-  /* ── Text submit handler ──────────────────────────── */
+  /* ── Text submit ─────────────────────────────────────── */
   const handleTextSubmit = useCallback(async () => {
     const text = textInput.trim()
     if (!text) return
@@ -179,7 +215,7 @@ export default function QuestionFlow({ mode, onComplete }) {
     }
   }, [textInput, sessionId, qIndex, followUpCount, handleAnalysis])
 
-  /* ── Render ───────────────────────────────────────── */
+  /* ── Render ──────────────────────────────────────────── */
   if (loading) {
     return (
       <div className="glass-card qf-loading">
@@ -196,8 +232,26 @@ export default function QuestionFlow({ mode, onComplete }) {
   return (
     <div className="glass-card qf-card">
       <div className="qf-header">
-        <div className="qf-progress-row">
-          <span className="qf-step-label">Question {qIndex + 1} of {questions.length}</span>
+        <div className="qf-steps">
+          {questions.map((_, i) => (
+            <div key={i} className={`qf-step ${completedQs.has(i) ? 'qf-step-done' : ''} ${i === qIndex && !completedQs.has(i) ? 'qf-step-active' : ''} ${i > qIndex && !completedQs.has(i) ? 'qf-step-future' : ''}`}>
+              <div className="qf-step-dot">
+                {completedQs.has(i) ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                ) : (
+                  <span>{i + 1}</span>
+                )}
+              </div>
+              {i < questions.length - 1 && <div className="qf-step-line" />}
+            </div>
+          ))}
+        </div>
+        <div className="qf-progress-meta">
+          <span className="qf-step-label">
+            {completedQs.size >= questions.length
+              ? 'All questions complete'
+              : `Question ${Math.min(qIndex + 1, questions.length)} of ${questions.length}`}
+          </span>
           {followUpCount > 0 && (
             <span className="qf-followup-badge">Follow-up {followUpCount}/{MAX_FOLLOWUPS}</span>
           )}
@@ -230,13 +284,38 @@ export default function QuestionFlow({ mode, onComplete }) {
       {error && <div className="qf-error">{error}</div>}
 
       <div className="qf-input-area">
-        {mode === 'voice' ? (
-          <VoiceRecorder
-            onAudioReady={handleVoiceBlob}
-            isProcessing={processing}
-            isSpeaking={speaking}
+        <div className="qf-dual-section">
+          <div className="qf-input-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            </svg>
+            Voice
+          </div>
+          <RealtimeVoice
+            sessionId={sessionId}
+            questionIndex={qIndex}
+            onUserTranscript={onUserTranscript}
+            onAITranscript={onAITranscript}
+            onQuestionDone={onQuestionDone}
+            onCheckInComplete={onCheckInComplete}
+            onDisconnect={onVoiceDisconnect}
+            onError={onVoiceError}
+            disabled={processing}
           />
-        ) : (
+        </div>
+
+        <div className="qf-divider">
+          <span>or</span>
+        </div>
+
+        <div className="qf-dual-section">
+          <div className="qf-input-label">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            Text
+          </div>
           <div className="qf-text-input">
             <textarea
               className="qf-textarea"
@@ -244,7 +323,7 @@ export default function QuestionFlow({ mode, onComplete }) {
               value={textInput}
               onChange={e => setTextInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleTextSubmit() } }}
-              rows={3}
+              rows={2}
               disabled={processing}
             />
             <button
@@ -260,7 +339,7 @@ export default function QuestionFlow({ mode, onComplete }) {
               )}
             </button>
           </div>
-        )}
+        </div>
       </div>
     </div>
   )

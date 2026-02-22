@@ -6,23 +6,6 @@ export async function createSession() {
   return r.json()
 }
 
-export async function voiceSubmit(audioBlob, sessionId, questionIndex, followUpCount) {
-  const form = new FormData()
-  form.append('audio', audioBlob, 'recording.webm')
-  form.append('session_id', sessionId)
-  form.append('question_index', String(questionIndex))
-  form.append('follow_up_count', String(followUpCount || 0))
-
-  const r = await fetch(`${API}/api/checkin/voice-submit`, { method: 'POST', body: form })
-  if (!r.ok) {
-    let detail = 'Voice submission failed'
-    try { const body = await r.json(); detail = body.detail || detail }
-    catch (_) { detail = await r.text() || detail }
-    throw new Error(detail)
-  }
-  return r.json()
-}
-
 export async function textSubmit(sessionId, questionIndex, response, followUpCount) {
   const r = await fetch(`${API}/api/checkin/text-submit`, {
     method: 'POST',
@@ -43,21 +26,6 @@ export async function textSubmit(sessionId, questionIndex, response, followUpCou
   return r.json()
 }
 
-export async function speakText(text) {
-  try {
-    const r = await fetch(`${API}/api/checkin/speak`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
-    })
-    if (!r.ok) return null
-    const data = await r.json()
-    return data.audio || null
-  } catch (_) {
-    return null
-  }
-}
-
 export async function checkCovered(sessionId, questionIndex) {
   try {
     const r = await fetch(`${API}/api/checkin/check-covered/${sessionId}/${questionIndex}`)
@@ -66,6 +34,38 @@ export async function checkCovered(sessionId, questionIndex) {
     return data.covered === true
   } catch (_) {
     return false
+  }
+}
+
+export async function getRealtimeToken(sessionId, questionIndex) {
+  const r = await fetch(`${API}/api/realtime/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, question_index: questionIndex }),
+  })
+  if (!r.ok) {
+    let detail = 'Failed to get realtime token'
+    try { const body = await r.json(); detail = body.detail || detail }
+    catch (_) { detail = await r.text() || detail }
+    throw new Error(detail)
+  }
+  return r.json()
+}
+
+export async function syncVoiceTranscript(sessionId, questionIndex, userText, aiText) {
+  try {
+    await fetch(`${API}/api/realtime/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        question_index: questionIndex,
+        user_text: userText || '',
+        ai_text: aiText || '',
+      }),
+    })
+  } catch (_) {
+    /* non-critical */
   }
 }
 

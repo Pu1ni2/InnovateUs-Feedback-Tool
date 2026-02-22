@@ -96,14 +96,50 @@ def add_response(sid: str, q_idx: int, response: str, analysis: dict | None = No
             logger.warning("ChromaDB store failed: %s", e)
 
 
+def add_voice_turn(sid: str, q_idx: int, role: str, text: str):
+    """Append a voice conversation turn (user or ai) to the session history."""
+    session = _sessions.get(sid)
+    if not session or not text:
+        return
+
+    entry = {
+        "question_idx": q_idx,
+        "role": role,
+        "text": text,
+        "ts": time.time(),
+    }
+    session["entries"].append(entry)
+
+    if role == "user":
+        coll = _get_collection()
+        if coll:
+            try:
+                doc_id = f"{sid}_v_{q_idx}_{len(session['entries'])}"
+                coll.add(
+                    documents=[text],
+                    metadatas=[{
+                        "session_id": sid,
+                        "question_idx": q_idx,
+                        "question": MAIN_QUESTIONS[q_idx] if q_idx < len(MAIN_QUESTIONS) else "",
+                    }],
+                    ids=[doc_id],
+                )
+            except Exception as e:
+                logger.warning("ChromaDB voice store failed: %s", e)
+
+
 def build_context_text(sid: str) -> str:
     session = _sessions.get(sid)
     if not session:
         return "(no prior conversation)"
     parts = []
     for e in session["entries"]:
-        parts.append(f"[Question {e['question_idx']+1}] {e['question']}\nParticipant: {e['response']}")
-    return "\n\n".join(parts) if parts else "(no prior conversation)"
+        if "role" in e:
+            label = "AI" if e["role"] == "ai" else "Participant"
+            parts.append(f"[Q{e['question_idx']+1}] {label}: {e['text']}")
+        else:
+            parts.append(f"[Q{e['question_idx']+1}] {e['question']}\nParticipant: {e['response']}")
+    return "\n".join(parts) if parts else "(no prior conversation)"
 
 
 def check_already_covered(sid: str, q_idx: int) -> list[str]:

@@ -1,24 +1,20 @@
 import { useState, useCallback } from 'react'
 import ConsentScreen from './ConsentScreen'
-import ModeSelect from './ModeSelect'
 import QuestionFlow from './QuestionFlow'
 import ThankYou from './ThankYou'
 import './App.css'
 
-const STEPS = { consent: 0, mode: 1, questions: 2, done: 3 }
+const STEPS = { consent: 0, questions: 1, done: 2 }
 
 export default function App() {
   const [step, setStep] = useState(STEPS.consent)
-  const [mode, setMode] = useState(null)
   const [responses, setResponses] = useState([])
 
-  const onConsent = useCallback(() => setStep(STEPS.mode), [])
-  const onModeSelect = useCallback((m) => { setMode(m); setStep(STEPS.questions) }, [])
+  const onConsent = useCallback(() => setStep(STEPS.questions), [])
   const onComplete = useCallback((r) => { setResponses(r); setStep(STEPS.done) }, [])
 
   return (
     <div className="app-shell">
-      {/* Background effects */}
       <div className="bg-orb bg-orb-1" />
       <div className="bg-orb bg-orb-2" />
       <div className="bg-orb bg-orb-3" />
@@ -39,8 +35,7 @@ export default function App() {
       <main className="app-content">
         <div className="card-container">
           {step === STEPS.consent && <ConsentScreen onAccept={onConsent} />}
-          {step === STEPS.mode && <ModeSelect onSelect={onModeSelect} />}
-          {step === STEPS.questions && <QuestionFlow mode={mode} onComplete={onComplete} />}
+          {step === STEPS.questions && <QuestionFlow onComplete={onComplete} />}
           {step === STEPS.done && <ThankYou responses={responses} />}
         </div>
       </main>

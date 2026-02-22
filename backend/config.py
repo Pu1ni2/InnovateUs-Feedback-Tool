@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     openai_whisper_model: str = "whisper-1"
     openai_tts_model: str = "tts-1"
     openai_tts_voice: str = "nova"
+    openai_realtime_model: str = "gpt-4o-mini-realtime-preview"
+    openai_realtime_voice: str = "alloy"
 
     class Config:
         env_file = str(ENV_PATH)

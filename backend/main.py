@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings, ENV_PATH
-from routers import checkin
+from routers import checkin, realtime
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -25,6 +25,7 @@ app.add_middleware(
 )
 
 app.include_router(checkin.router)
+app.include_router(realtime.router)
 
 
 @app.on_event("startup")

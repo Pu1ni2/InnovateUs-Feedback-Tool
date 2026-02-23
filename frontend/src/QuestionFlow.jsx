@@ -218,26 +218,42 @@ export default function QuestionFlow({ onComplete }) {
   /* ── Render ──────────────────────────────────────────── */
   if (loading) {
     return (
-      <div className="glass-card qf-loading">
-        <div className="qf-spinner" />
-        <span>Loading your check-in…</span>
+      <div className="qf-shell">
+        <div className="qf-loading">
+          <div className="qf-spinner" />
+          <span>Setting up your check-in…</span>
+        </div>
       </div>
     )
   }
 
   if (error && !questions.length) {
-    return <div className="glass-card qf-error-card">{error}</div>
+    return (
+      <div className="qf-shell">
+        <div className="qf-loading qf-error-state">{error}</div>
+      </div>
+    )
   }
 
   return (
-    <div className="glass-card qf-card">
-      <div className="qf-header">
+    <div className="qf-shell">
+      {/* ── Top bar ── */}
+      <header className="qf-topbar">
+        <div className="qf-topbar-left">
+          <svg width="20" height="20" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="6" fill="url(#lg)" />
+            <path d="M10 16l4 4 8-8" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <defs><linearGradient id="lg" x1="0" y1="0" x2="32" y2="32"><stop stopColor="#638cff"/><stop offset="1" stopColor="#a78bfa"/></linearGradient></defs>
+          </svg>
+          <span className="qf-brand">InnovateUS</span>
+        </div>
+
         <div className="qf-steps">
           {questions.map((_, i) => (
-            <div key={i} className={`qf-step ${completedQs.has(i) ? 'qf-step-done' : ''} ${i === qIndex && !completedQs.has(i) ? 'qf-step-active' : ''} ${i > qIndex && !completedQs.has(i) ? 'qf-step-future' : ''}`}>
+            <div key={i} className={`qf-step ${completedQs.has(i) ? 'done' : i === qIndex ? 'active' : ''}`}>
               <div className="qf-step-dot">
                 {completedQs.has(i) ? (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
                 ) : (
                   <span>{i + 1}</span>
                 )}
@@ -246,34 +262,33 @@ export default function QuestionFlow({ onComplete }) {
             </div>
           ))}
         </div>
-        <div className="qf-progress-meta">
-          <span className="qf-step-label">
-            {completedQs.size >= questions.length
-              ? 'All questions complete'
-              : `Question ${Math.min(qIndex + 1, questions.length)} of ${questions.length}`}
-          </span>
-          {followUpCount > 0 && (
-            <span className="qf-followup-badge">Follow-up {followUpCount}/{MAX_FOLLOWUPS}</span>
-          )}
-        </div>
-        <div className="qf-progress-track">
-          <div className="qf-progress-fill" style={{ width: `${progress}%` }} />
-        </div>
+
+        <span className="qf-topbar-right">
+          {completedQs.size >= questions.length
+            ? 'Complete'
+            : `${Math.min(qIndex + 1, questions.length)} / ${questions.length}`}
+        </span>
+      </header>
+
+      {/* ── Progress bar ── */}
+      <div className="qf-progress-track">
+        <div className="qf-progress-fill" style={{ width: `${progress}%` }} />
       </div>
 
-      <div className="qf-conversation">
+      {/* ── Chat area ── */}
+      <div className="qf-chat">
         {conversation.map((msg, i) => (
-          <div key={i} className={`qf-msg qf-msg-${msg.role} ${msg.isFollowUp ? 'qf-msg-followup' : ''} ${msg.isSkip || msg.isTransition ? 'qf-msg-transition' : ''}`}>
+          <div key={i} className={`qf-msg ${msg.role} ${msg.isFollowUp ? 'followup' : ''} ${msg.isSkip || msg.isTransition ? 'transition' : ''}`}>
             {msg.role === 'ai' && (
-              <div className="qf-msg-avatar">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <div className="qf-avatar">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 8V4H8"/><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="6" y="14" width="12" height="8" rx="2"/><path d="M12 10v4"/><path d="M2 10h20"/>
                 </svg>
               </div>
             )}
-            <div className="qf-msg-bubble">
-              {msg.isFollowUp && <span className="qf-fu-tag">Follow-up</span>}
-              {(msg.isSkip || msg.isTransition) && <span className="qf-skip-tag">Transition</span>}
+            <div className="qf-bubble">
+              {msg.isFollowUp && <span className="qf-tag tag-followup">Follow-up</span>}
+              {(msg.isSkip || msg.isTransition) && <span className="qf-tag tag-skip">Skipped</span>}
               <p>{msg.text}</p>
             </div>
           </div>
@@ -281,53 +296,40 @@ export default function QuestionFlow({ onComplete }) {
         <div ref={chatEndRef} />
       </div>
 
-      {error && <div className="qf-error">{error}</div>}
+      {/* ── Error toast ── */}
+      {error && <div className="qf-toast">{error}</div>}
 
-      <div className="qf-input-area">
-        <div className="qf-dual-section">
-          <div className="qf-input-label">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-            </svg>
-            Voice
+      {/* ── Bottom input bar ── */}
+      <footer className="qf-bottom">
+        <div className="qf-bottom-inner">
+          <div className="qf-voice-col">
+            <RealtimeVoice
+              sessionId={sessionId}
+              questionIndex={qIndex}
+              onUserTranscript={onUserTranscript}
+              onAITranscript={onAITranscript}
+              onQuestionDone={onQuestionDone}
+              onCheckInComplete={onCheckInComplete}
+              onDisconnect={onVoiceDisconnect}
+              onError={onVoiceError}
+              disabled={processing}
+            />
           </div>
-          <RealtimeVoice
-            sessionId={sessionId}
-            questionIndex={qIndex}
-            onUserTranscript={onUserTranscript}
-            onAITranscript={onAITranscript}
-            onQuestionDone={onQuestionDone}
-            onCheckInComplete={onCheckInComplete}
-            onDisconnect={onVoiceDisconnect}
-            onError={onVoiceError}
-            disabled={processing}
-          />
-        </div>
 
-        <div className="qf-divider">
-          <span>or</span>
-        </div>
+          <div className="qf-sep" />
 
-        <div className="qf-dual-section">
-          <div className="qf-input-label">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            Text
-          </div>
-          <div className="qf-text-input">
+          <div className="qf-text-col">
             <textarea
               className="qf-textarea"
               placeholder="Type your response…"
               value={textInput}
               onChange={e => setTextInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleTextSubmit() } }}
-              rows={2}
+              rows={1}
               disabled={processing}
             />
             <button
-              className="qf-send-btn"
+              className="qf-send"
               onClick={handleTextSubmit}
               disabled={!textInput.trim() || processing}
               title="Send"
@@ -335,12 +337,12 @@ export default function QuestionFlow({ onComplete }) {
               {processing ? (
                 <div className="qf-send-spinner" />
               ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               )}
             </button>
           </div>
         </div>
-      </div>
+      </footer>
     </div>
   )
 }

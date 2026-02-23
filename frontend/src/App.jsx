@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { ContainerScroll } from '@/components/ui/container-scroll-animation'
 import ConsentScreen from './ConsentScreen'
 import QuestionFlow from './QuestionFlow'
 import ThankYou from './ThankYou'
@@ -12,37 +13,38 @@ export default function App() {
 
   const onConsent = useCallback(() => setStep(STEPS.questions), [])
   const onComplete = useCallback((r) => { setResponses(r); setStep(STEPS.done) }, [])
+  const onRestart = useCallback(() => { setResponses([]); setStep(STEPS.consent) }, [])
 
   return (
-    <div className="app-shell">
-      <div className="bg-orb bg-orb-1" />
-      <div className="bg-orb bg-orb-2" />
-      <div className="bg-orb bg-orb-3" />
-      <div className="bg-grid" />
-
-      <header className="app-header">
-        <div className="logo-mark">
-          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-            <rect width="32" height="32" rx="8" fill="url(#g)" />
-            <path d="M10 16l4 4 8-8" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-            <defs><linearGradient id="g" x1="0" y1="0" x2="32" y2="32"><stop stopColor="#3b82f6"/><stop offset="1" stopColor="#8b5cf6"/></linearGradient></defs>
-          </svg>
+    <div className="app-root app-scroll">
+      <ContainerScroll
+        titleComponent={
+          <>
+            <h1 className="text-4xl font-semibold text-black dark:text-black">
+              InnovateUS
+              <br />
+              <span className="text-4xl md:text-[6rem] font-bold mt-1 leading-none bg-gradient-to-r from-indigo-500 to-purple-600 bg-clip-text text-transparent">
+                Impact Check-In
+              </span>
+            </h1>
+            <p className="mt-4 text-lg text-gray-500 max-w-xl mx-auto">
+              AI-powered voice & text feedback for behavior change measurement
+            </p>
+          </>
+        }
+      >
+        <div className="form-screen-container">
+          {step === STEPS.consent && (
+            <ConsentScreen onAccept={onConsent} />
+          )}
+          {step === STEPS.questions && (
+            <QuestionFlow onComplete={onComplete} />
+          )}
+          {step === STEPS.done && (
+            <ThankYou responses={responses} onRestart={onRestart} />
+          )}
         </div>
-        <h1>InnovateUS <span>Impact Check-In</span></h1>
-        <p className="subtitle">Measuring behavior change through AI-powered feedback</p>
-      </header>
-
-      <main className="app-content">
-        <div className="card-container">
-          {step === STEPS.consent && <ConsentScreen onAccept={onConsent} />}
-          {step === STEPS.questions && <QuestionFlow onComplete={onComplete} />}
-          {step === STEPS.done && <ThankYou responses={responses} />}
-        </div>
-      </main>
-
-      <footer className="app-footer">
-        <p>Powered by OpenAI &middot; Built for impact measurement</p>
-      </footer>
+      </ContainerScroll>
     </div>
   )
 }

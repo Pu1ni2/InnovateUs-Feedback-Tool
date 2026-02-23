@@ -1,196 +1,162 @@
 .rv-container {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.75rem;
-  border-radius: var(--radius-sm);
-  background: rgba(59, 130, 246, 0.03);
-  border: 1px solid rgba(59, 130, 246, 0.1);
-  transition: all 0.3s ease;
+  transition: all 0.2s;
 }
 
 .rv-container.rv-disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   pointer-events: none;
 }
 
-.rv-container.rv-user_speaking {
-  border-color: rgba(16, 185, 129, 0.3);
-  background: rgba(16, 185, 129, 0.04);
-}
-
-.rv-container.rv-ai_speaking {
-  border-color: rgba(139, 92, 246, 0.3);
-  background: rgba(139, 92, 246, 0.04);
-}
-
-/* Connect button */
+/* Connect button — compact pill */
 .rv-connect-btn {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.7rem 1.5rem;
-  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  background: var(--accent);
   color: #fff;
   border: none;
   border-radius: 100px;
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  transition: all 0.2s;
-  box-shadow: 0 3px 12px rgba(59, 130, 246, 0.3);
+  white-space: nowrap;
+  transition: background 0.15s;
 }
 
-.rv-connect-btn:hover:not(:disabled) {
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
-  transform: translateY(-1px);
-  box-shadow: 0 5px 16px rgba(59, 130, 246, 0.4);
-}
+.rv-connect-btn:hover:not(:disabled) { background: #4f46e5; }
+.rv-connect-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.rv-connect-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+.rv-connect-btn svg { width: 16px; height: 16px; }
 
-/* Status row */
+/* Status row (connecting / done) */
 .rv-status-row {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  color: var(--text-secondary);
-  font-size: 0.84rem;
+  gap: 0.4rem;
+  color: var(--text-2);
+  font-size: 0.8rem;
   font-weight: 500;
-  padding: 0.35rem 0;
+  white-space: nowrap;
 }
 
-.rv-done-row { color: var(--success); }
+.rv-done-row { color: var(--green); }
 
 .rv-spinner {
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--glass-border);
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
 
-/* Active area */
+/* Active area — inline row */
 .rv-active-area {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
-  width: 100%;
+  gap: 0.6rem;
 }
 
-/* Orb visualization */
-.rv-viz {
-  display: flex;
-  justify-content: center;
-  padding: 0.25rem 0;
-}
+/* Orb — small inline */
+.rv-viz { display: flex; align-items: center; }
 
 .rv-orb {
   position: relative;
-  width: 52px;
-  height: 52px;
+  width: 36px;
+  height: 36px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .rv-orb-core {
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-  box-shadow: 0 0 16px rgba(59, 130, 246, 0.35);
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent-dim);
 }
 
 .rv-user_speaking .rv-orb-core {
-  background: linear-gradient(135deg, #10b981, #059669);
-  box-shadow: 0 0 20px rgba(16, 185, 129, 0.45);
+  background: var(--green);
+  box-shadow: 0 0 14px var(--green-dim);
   animation: orb-pulse 0.8s ease-in-out infinite;
 }
 
 .rv-ai_speaking .rv-orb-core {
-  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
-  box-shadow: 0 0 20px rgba(139, 92, 246, 0.45);
+  background: var(--purple);
+  box-shadow: 0 0 14px var(--purple-dim);
   animation: orb-pulse 1.2s ease-in-out infinite;
 }
 
 .rv-orb-ring {
   position: absolute;
   border-radius: 50%;
-  border: 1.5px solid rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.12);
 }
 
-.rv-ring-1 {
-  width: 38px;
-  height: 38px;
-  animation: ring-expand 2s ease-in-out infinite;
-}
+.rv-ring-1 { width: 26px; height: 26px; animation: ring-expand 2s ease-in-out infinite; }
+.rv-ring-2 { width: 36px; height: 36px; animation: ring-expand 2s ease-in-out infinite 0.5s; }
 
-.rv-ring-2 {
-  width: 52px;
-  height: 52px;
-  animation: ring-expand 2s ease-in-out infinite 0.5s;
-}
-
-.rv-user_speaking .rv-orb-ring { border-color: rgba(16, 185, 129, 0.2); }
-.rv-ai_speaking .rv-orb-ring { border-color: rgba(139, 92, 246, 0.2); }
+.rv-user_speaking .rv-orb-ring { border-color: rgba(16, 185, 129, 0.15); }
+.rv-ai_speaking .rv-orb-ring { border-color: rgba(139, 92, 246, 0.15); }
 
 @keyframes orb-pulse {
   0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.12); }
+  50% { transform: scale(1.15); }
 }
 
 @keyframes ring-expand {
   0% { transform: scale(0.8); opacity: 0.5; }
-  100% { transform: scale(1.2); opacity: 0; }
+  100% { transform: scale(1.25); opacity: 0; }
 }
 
-/* Status text */
+/* Status text — inline */
 .rv-status-text {
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  color: var(--text-secondary);
+  color: var(--text-2);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
-.rv-user_speaking .rv-status-text { color: var(--success); }
-.rv-ai_speaking .rv-status-text { color: #8b5cf6; }
+.rv-user_speaking .rv-status-text { color: var(--green); }
+.rv-ai_speaking .rv-status-text { color: var(--purple); }
 
-/* Live transcript */
+/* Live transcript — small inline */
 .rv-live-transcript {
-  font-size: 0.82rem;
-  color: var(--text-secondary);
-  text-align: center;
-  max-width: 90%;
-  line-height: 1.45;
-  opacity: 0.8;
+  font-size: 0.75rem;
+  color: var(--text-2);
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-style: italic;
-  max-height: 50px;
-  overflow-y: auto;
+  opacity: 0.75;
 }
 
-/* End button */
+/* End button — compact */
 .rv-end-btn {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 1rem;
-  background: rgba(239, 68, 68, 0.08);
-  color: var(--error);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  gap: 0.25rem;
+  padding: 0.3rem 0.65rem;
+  background: var(--red-dim);
+  color: var(--red);
+  border: 1px solid rgba(239, 68, 68, 0.15);
   border-radius: 100px;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 600;
-  transition: all 0.2s;
+  white-space: nowrap;
+  transition: background 0.15s;
 }
 
 .rv-end-btn:hover {
   background: rgba(239, 68, 68, 0.15);
-  border-color: rgba(239, 68, 68, 0.35);
 }
+
+.rv-end-btn svg { width: 12px; height: 12px; }

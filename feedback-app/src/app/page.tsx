@@ -86,8 +86,8 @@ export default function Home() {
                   animate={{ opacity: 1, y: 0 }}
                   className="mb-4"
                 >
-                  <span className="inline-flex items-center gap-2 px-4 py-2 bg-amber-100/80 text-amber-800 rounded-full text-sm font-medium">
-                    <Sparkles className="w-4 h-4" />
+                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium" style={{ backgroundColor: 'rgba(208, 144, 6, 0.15)', color: '#D09006' }}>
+                    <Sparkles className="w-4 h-4" style={{ color: '#FDCE3E' }} />
                     Hi, {userName}
                   </span>
                 </motion.div>
@@ -98,9 +98,11 @@ export default function Home() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, ease: "easeOut" }}
-              className="text-4xl md:text-5xl lg:text-6xl font-semibold text-stone-800 tracking-tight mb-4"
+              className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight mb-4"
             >
-              InnovateUS Impact Check-In
+              <span style={{ color: '#124D8F' }}>Innovate</span>
+              <span style={{ color: '#D09006' }}>(US)</span>
+              <span className="text-stone-600"> Impact Check-In</span>
             </motion.h1>
 
             <motion.p
@@ -109,7 +111,8 @@ export default function Home() {
               transition={{ duration: 0.6, delay: 0.1, ease: "easeOut" }}
               className="text-lg md:text-xl text-stone-600 max-w-2xl mx-auto"
             >
-              AI-powered voice & text feedback for behavior change measurement
+              AI-powered voice & text feedback for{" "}
+              <span style={{ color: '#124D8F' }} className="font-medium">behavior change measurement</span>
             </motion.p>
 
             <motion.div
@@ -156,8 +159,8 @@ export default function Home() {
                 className="absolute inset-0 flex flex-col items-center justify-center p-6 z-10 pointer-events-auto cursor-pointer"
                 onClick={handleEnterFocus}
               >
-                <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mb-4 pointer-events-none">
-                  <MessageSquare className="w-8 h-8 text-amber-600" />
+                <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4 pointer-events-none" style={{ backgroundColor: 'rgba(253, 206, 62, 0.2)' }}>
+                  <MessageSquare className="w-8 h-8" style={{ color: '#FDCE3E' }} />
                 </div>
                 <h3 className="text-xl font-medium text-stone-800 mb-2 text-center pointer-events-none">
                   Ready to share your feedback?
@@ -172,9 +175,10 @@ export default function Home() {
                       handleEnterFocus();
                     }}
                     size="lg"
-                    className="gap-2 bg-amber-600 hover:bg-amber-700 text-white"
+                    className="gap-2 text-white font-semibold shadow-md border-0"
+                    style={{ backgroundColor: '#124D8F' }}
                   >
-                    <Maximize2 className="w-4 h-4" />
+                    <Maximize2 className="w-5 h-5" style={{ color: '#FDCE3E' }} />
                     Enter Form
                   </Button>
                 </div>

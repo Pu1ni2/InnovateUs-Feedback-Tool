@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { motion, useMotionValue, useSpring } from "framer-motion";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 interface Dot {
   x: number;
@@ -12,17 +11,14 @@ interface Dot {
 export function DottedBackground() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dots, setDots] = useState<Dot[]>([]);
-  const mouseX = useMotionValue(0);
-  const mouseY = useMotionValue(0);
-  
-  // Smooth spring for mouse following
-  const smoothMouseX = useSpring(mouseX, { stiffness: 150, damping: 20 });
-  const smoothMouseY = useSpring(mouseY, { stiffness: 150, damping: 20 });
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const rafRef = useRef<number>();
+  const mouseRef = useRef({ x: 0, y: 0 });
 
   // Generate dots on mount
   useEffect(() => {
     const generateDots = () => {
-      const spacing = 40;
+      const spacing = 48; // Increased spacing for better performance
       const cols = Math.ceil(window.innerWidth / spacing) + 2;
       const rows = Math.ceil(window.innerHeight / spacing) + 2;
       const newDots: Dot[] = [];
@@ -44,38 +40,46 @@ export function DottedBackground() {
     return () => window.removeEventListener("resize", generateDots);
   }, []);
 
-  // Track mouse position
+  // Track mouse position with RAF for performance
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      mouseX.set(e.clientX);
-      mouseY.set(e.clientY);
+      mouseRef.current = { x: e.clientX, y: e.clientY };
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
-  }, [mouseX, mouseY]);
+    const updateMousePos = () => {
+      setMousePos(mouseRef.current);
+      rafRef.current = requestAnimationFrame(updateMousePos);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove, { passive: true });
+    rafRef.current = requestAnimationFrame(updateMousePos);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, []);
 
   return (
     <div ref={containerRef} className="fixed inset-0 pointer-events-none z-0 overflow-hidden bg-[#FDF8F3]">
-      {/* Interactive dots */}
+      {/* Static dots - rendered once for better performance */}
       {dots.map((dot) => (
         <InteractiveDot
           key={dot.id}
           dot={dot}
-          mouseX={smoothMouseX}
-          mouseY={smoothMouseY}
+          mouseX={mousePos.x}
+          mouseY={mousePos.y}
         />
       ))}
       
-      {/* Subtle ambient glow that follows mouse */}
-      <motion.div
-        className="absolute w-[500px] h-[500px] rounded-full pointer-events-none"
+      {/* Single ambient glow - CSS-based, no JS animation */}
+      <div
+        className="absolute w-[400px] h-[400px] rounded-full pointer-events-none transition-transform duration-300 ease-out"
         style={{
-          x: mouseX,
-          y: mouseY,
-          translateX: "-50%",
-          translateY: "-50%",
-          background: `radial-gradient(circle, rgba(217, 119, 6, 0.08) 0%, transparent 60%)`,
+          left: mousePos.x - 200,
+          top: mousePos.y - 200,
+          background: `radial-gradient(circle, rgba(217, 119, 6, 0.06) 0%, transparent 60%)`,
+          willChange: 'transform',
         }}
       />
     </div>
@@ -84,62 +88,36 @@ export function DottedBackground() {
 
 interface InteractiveDotProps {
   dot: Dot;
-  mouseX: ReturnType<typeof useSpring>;
-  mouseY: ReturnType<typeof useSpring>;
+  mouseX: number;
+  mouseY: number;
 }
 
 function InteractiveDot({ dot, mouseX, mouseY }: InteractiveDotProps) {
-  const [distance, setDistance] = useState(100);
-  const dotRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const unsubscribeX = mouseX.on("change", (x) => {
-      const unsubscribeY = mouseY.on("change", (y) => {
-        const dx = x - dot.x;
-        const dy = y - dot.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        setDistance(dist);
-      });
-      return () => unsubscribeY();
-    });
-    
-    return () => unsubscribeX();
-  }, [dot.x, dot.y, mouseX, mouseY]);
-
-  // Calculate dot properties based on distance to mouse
-  const maxDistance = 150;
+  // Calculate distance for visual effect (no state updates for performance)
+  const dx = mouseX - dot.x;
+  const dy = mouseY - dot.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  
+  const maxDistance = 120;
   const proximity = Math.max(0, 1 - distance / maxDistance);
   
-  // Dot gets bigger, brighter, and moves slightly toward mouse when close
-  const scale = 1 + proximity * 1.5;
-  const opacity = 0.2 + proximity * 0.6;
-  const offsetX = proximity * (mouseX.get() - dot.x) * 0.1;
-  const offsetY = proximity * (mouseY.get() - dot.y) * 0.1;
+  // Simple CSS transform - no spring animation for performance
+  const scale = 1 + proximity * 0.8;
+  const opacity = 0.15 + proximity * 0.5;
+  const isActive = proximity > 0.3;
 
   return (
-    <motion.div
-      ref={dotRef}
-      className="absolute rounded-full"
+    <div
+      className="absolute rounded-full transition-all duration-200 ease-out"
       style={{
-        left: dot.x,
-        top: dot.y,
+        left: dot.x - 2,
+        top: dot.y - 2,
         width: 4,
         height: 4,
-        backgroundColor: proximity > 0.5 ? "#d97706" : "#a8a29e",
+        backgroundColor: isActive ? "#b45309" : "#a8a29e",
         opacity,
-        scale,
-        x: offsetX,
-        y: offsetY,
-      }}
-      animate={{
-        scale,
-        x: offsetX,
-        y: offsetY,
-      }}
-      transition={{
-        type: "spring",
-        stiffness: 300,
-        damping: 20,
+        transform: `scale(${scale})`,
+        willChange: 'transform, opacity',
       }}
     />
   );

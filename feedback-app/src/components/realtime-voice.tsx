@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { getRealtimeToken, syncVoiceTranscript } from '@/lib/api'
-import { Mic, MicOff, X, Loader2 } from 'lucide-react'
+import { Mic, Square, Volume2, Activity, Loader2, Lock } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { motion, AnimatePresence } from 'framer-motion'
 
 const REALTIME_URL = 'https://api.openai.com/v1/realtime'
 
@@ -17,6 +18,7 @@ interface RealtimeVoiceProps {
   onDisconnect: (lastCompletedQ: number) => void
   onError: (msg: string) => void
   disabled?: boolean
+  isFullscreen?: boolean
 }
 
 type VoiceStatus = 'idle' | 'connecting' | 'ready' | 'user_speaking' | 'processing' | 'ai_speaking' | 'done'
@@ -31,6 +33,7 @@ export default function RealtimeVoice({
   onDisconnect,
   onError,
   disabled,
+  isFullscreen,
 }: RealtimeVoiceProps) {
   const [status, setStatus] = useState<VoiceStatus>('idle')
   const [aiText, setAiText] = useState('')
@@ -103,6 +106,7 @@ export default function RealtimeVoice({
 
     if (type === 'session.created' || type === 'session.updated') {
       if (mountedRef.current) setStatus('ready')
+      // When voice starts, AI should speak the current question
       if (!greetingSentRef.current) {
         greetingSentRef.current = true
         const dc = dcRef.current
@@ -243,17 +247,24 @@ export default function RealtimeVoice({
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
 
-      const sdpResp = await fetch(
-        `${REALTIME_URL}?model=${encodeURIComponent(model || 'gpt-4o-mini-realtime-preview')}`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/sdp',
-          },
-          body: offer.sdp,
+      const sdpUrl = `${REALTIME_URL}?model=${encodeURIComponent(model || 'gpt-4o-mini-realtime-preview')}`
+      const sdpRequest: RequestInit = {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/sdp',
         },
-      )
+        body: offer.sdp,
+      }
+
+      let sdpResp: Response
+      try {
+        sdpResp = await fetch(sdpUrl, sdpRequest)
+      } catch {
+        // One retry helps with transient browser/network handshake failures.
+        await new Promise(resolve => setTimeout(resolve, 400))
+        sdpResp = await fetch(sdpUrl, sdpRequest)
+      }
 
       if (!sdpResp.ok) throw new Error(`SDP exchange failed: ${sdpResp.status}`)
 
@@ -262,7 +273,14 @@ export default function RealtimeVoice({
 
     } catch (err: any) {
       console.error('Realtime connect error:', err)
-      if (p.onError) p.onError(err.message || 'Failed to connect voice')
+      const msg = err?.message || 'Failed to connect voice'
+      if (p.onError) {
+        if (msg === 'Failed to fetch') {
+          p.onError('Voice connection failed. Check internet/backend, then try Start Voice again.')
+        } else {
+          p.onError(msg)
+        }
+      }
       disconnectNow()
       if (mountedRef.current) setStatus('idle')
     }
@@ -289,80 +307,165 @@ export default function RealtimeVoice({
   const isActive = ['ready', 'user_speaking', 'processing', 'ai_speaking'].includes(status)
 
   return (
-    <div className={`voice-container voice-${status} ${disabled ? 'voice-disabled' : ''}`}>
+    <div className={`w-full ${disabled ? 'opacity-50 pointer-events-none' : ''}`}>
       <audio ref={audioElRef} style={{ display: 'none' }} />
 
-      {status === 'idle' && (
-        <Button 
-          onClick={connect} 
-          disabled={disabled}
-          variant="outline"
-          className="gap-2 border-amber-600 text-amber-700 hover:bg-amber-50"
-        >
-          <Mic className="w-4 h-4" />
-          <span>Start Voice Conversation</span>
-        </Button>
-      )}
+      <AnimatePresence mode="wait">
+        {status === 'idle' && (
+          <motion.div
+            key="idle"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex justify-center"
+          >
+            <Button 
+              onClick={connect} 
+              disabled={disabled}
+              className="gap-2 py-2.5 px-5 rounded-full shadow-sm transition-all duration-300 border-0"
+              style={{ backgroundColor: '#B85C14' }}
+            >
+              <div className="w-5 h-5 rounded-full bg-white/25 flex items-center justify-center">
+                <Mic className="w-3 h-3 text-white" />
+              </div>
+              <span className="text-white font-medium text-sm tracking-wide">Start Voice Conversation</span>
+            </Button>
+          </motion.div>
+        )}
 
-      {status === 'connecting' && (
-        <div className="flex items-center gap-2 text-sm text-stone-600">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          <span>Connecting to AI...</span>
-        </div>
-      )}
+        {status === 'connecting' && (
+          <motion.div
+            key="connecting"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="flex items-center justify-center gap-2 py-4"
+          >
+            <Loader2 className="w-5 h-5 animate-spin text-amber-600" />
+            <span className="text-sm font-medium text-stone-600">Connecting...</span>
+          </motion.div>
+        )}
 
-      {isActive && (
-        <div className="flex flex-col items-center gap-3">
-          {/* Voice visualization */}
-          <div className="relative">
-            <div className={`w-12 h-12 rounded-full flex items-center justify-center ${
-              status === 'user_speaking' ? 'bg-amber-500' : 
-              status === 'ai_speaking' ? 'bg-blue-500' : 'bg-stone-400'
-            }`}>
+        {isActive && (
+          <motion.div
+            key="active"
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="flex flex-col items-center gap-4 py-4"
+          >
+            {/* Waveform Visualization - like the reference image */}
+            <div className="flex items-center justify-center h-16 gap-[2px]">
               {status === 'user_speaking' ? (
-                <div className="flex items-center gap-0.5">
-                  <span className="w-1 h-3 bg-white rounded-full animate-pulse" />
-                  <span className="w-1 h-4 bg-white rounded-full animate-pulse delay-75" />
-                  <span className="w-1 h-2 bg-white rounded-full animate-pulse delay-150" />
-                </div>
+                // Animated waveform when user is speaking
+                <>
+                  {[...Array(40)].map((_, i) => (
+                    <motion.div
+                      key={i}
+                      className="w-[3px] bg-amber-600 rounded-full"
+                      animate={{
+                        height: [8, Math.random() * 40 + 15, 8],
+                      }}
+                      transition={{
+                        duration: 0.4 + Math.random() * 0.3,
+                        repeat: Infinity,
+                        delay: i * 0.02,
+                      }}
+                    />
+                  ))}
+                </>
               ) : status === 'ai_speaking' ? (
-                <Mic className="w-5 h-5 text-white" />
+                // Gentler animation when AI is speaking
+                <>
+                  {[...Array(40)].map((_, i) => (
+                    <motion.div
+                      key={i}
+                      className="w-[3px] bg-amber-500 rounded-full"
+                      animate={{
+                        height: [8, Math.random() * 30 + 10, 8],
+                      }}
+                      transition={{
+                        duration: 0.5 + Math.random() * 0.3,
+                        repeat: Infinity,
+                        delay: i * 0.03,
+                      }}
+                    />
+                  ))}
+                </>
               ) : (
-                <Loader2 className="w-5 h-5 text-white animate-spin" />
+                // Static bars when processing
+                <>
+                  {[...Array(40)].map((_, i) => (
+                    <div
+                      key={i}
+                      className="w-[3px] bg-stone-300 rounded-full"
+                      style={{ height: `${8 + Math.sin(i * 0.3) * 6 + 6}px` }}
+                    />
+                  ))}
+                </>
               )}
             </div>
-            {/* Orbiting rings */}
-            <div className="absolute inset-0 rounded-full border-2 border-amber-400/30 animate-ping" />
-          </div>
-          
-          <div className="text-sm font-medium text-stone-700">{statusLabel[status]}</div>
-          
-          {aiText && (
-            <div className="text-xs text-stone-500 max-w-[200px] truncate">{aiText}</div>
-          )}
-          
-          <Button 
-            size="sm" 
-            variant="outline" 
-            onClick={handleEndVoice}
-            className="gap-1 text-xs border-red-300 text-red-600 hover:bg-red-50"
-          >
-            <X className="w-3 h-3" />
-            End Voice
-          </Button>
-        </div>
-      )}
 
-      {status === 'done' && (
-        <div className="flex items-center gap-2 text-sm text-green-600">
-          <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-              <path d="M20 6L9 17l-5-5"/>
-            </svg>
-          </div>
-          <span>Voice conversation complete</span>
-        </div>
-      )}
+            {/* Status text */}
+            <p className="text-sm text-stone-600 font-medium">
+              {status === 'user_speaking' ? 'Listening...' :
+               status === 'ai_speaking' ? 'AI is speaking' :
+               'Processing...'}
+            </p>
+            
+            {/* Red Stop Button - matching reference image */}
+            <Button 
+              onClick={handleEndVoice}
+              className="w-full max-w-sm gap-3 py-3 px-5 rounded-full shadow-sm transition-all border-0 hover:opacity-90"
+              style={{ backgroundColor: '#D32F2F' }}
+            >
+              <div className="w-5 h-5 rounded bg-white flex items-center justify-center">
+                <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: '#D32F2F' }} />
+              </div>
+              <span className="text-white font-medium text-base tracking-wide">Stop Voice Recording</span>
+            </Button>
+
+            {/* Privacy notice */}
+            <div className="flex items-center gap-1.5 text-xs text-stone-500">
+              <Lock className="w-3 h-3" />
+              <span>Your voice is private</span>
+            </div>
+            
+            {/* Live Transcript */}
+            <AnimatePresence>
+              {aiText && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="w-full max-w-md"
+                >
+                  <div className="bg-stone-50 rounded-lg p-3 border border-stone-200">
+                    <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">AI Response</p>
+                    <p className="text-stone-700 text-sm leading-relaxed">{aiText}</p>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </motion.div>
+        )}
+
+        {status === 'done' && (
+          <motion.div
+            key="done"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-center justify-center gap-2 py-4 text-green-600"
+          >
+            <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M20 6L9 17l-5-5"/>
+              </svg>
+            </div>
+            <span className="font-medium">Voice conversation complete</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

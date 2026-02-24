@@ -33,7 +33,8 @@ export const ContainerScroll = ({
   // Scroll-based transforms
   const scrollRotate = useTransform(scrollYProgress, [0, 1], [20, 0]);
   const scrollScale = useTransform(scrollYProgress, [0, 1], isMobile ? [0.7, 0.9] : [1.05, 1]);
-  const translate = useTransform(scrollYProgress, [0, 1], [0, -100]);
+  // Reduced translate range so header doesn't get cut off at top
+  const translate = useTransform(scrollYProgress, [0, 1], [60, -40]);
 
   // Track if we should force flat rotation
   const forceFlat = useMotionValue(0);
@@ -82,8 +83,8 @@ export const ContainerScroll = ({
       ref={containerRef}
     >
       <div
-        className={`w-full relative flex items-center justify-center ${
-          isFullscreen ? 'h-full py-0' : isFocused ? 'py-0' : 'py-10 md:py-40'
+        className={`w-full relative flex items-start justify-center ${
+          isFullscreen ? 'h-full py-0' : isFocused ? 'py-0' : 'pt-32 md:pt-48 pb-20 md:pb-32'
         }`}
         style={{
           perspective: "1000px",
@@ -148,13 +149,13 @@ export const Card = ({
     } else if (isFocused) {
       // Normal focused: Same size as the tab/screen (same as unfocused but straight)
       return {
-        cardClass: 'max-w-5xl -mt-12 h-[30rem] md:h-[40rem] w-full border-4 border-stone-300 p-2 md:p-6 bg-stone-100 rounded-[30px] shadow-2xl',
+        cardClass: 'max-w-5xl mt-8 h-[30rem] md:h-[40rem] w-full border-4 border-stone-300 p-2 md:p-6 bg-stone-100 rounded-[30px] shadow-2xl',
         innerClass: 'rounded-2xl md:rounded-2xl',
       };
     } else {
       // Unfocused: Scroll animation with tilt
       return {
-        cardClass: 'max-w-5xl -mt-12 h-[30rem] md:h-[40rem] w-full border-4 border-stone-300 p-2 md:p-6 bg-stone-100 rounded-[30px] shadow-2xl',
+        cardClass: 'max-w-5xl mt-8 h-[30rem] md:h-[40rem] w-full border-4 border-stone-300 p-2 md:p-6 bg-stone-100 rounded-[30px] shadow-2xl',
         innerClass: 'rounded-2xl md:rounded-2xl',
       };
     }

@@ -133,11 +133,9 @@ export function FeedbackForm({
 
   /* ── Voice callbacks ─────────────────────────────────── */
   const onUserTranscript = useCallback((text: string) => {
+    // Voice transcript should appear in chat only, never in typed input.
     setConversation(prev => [...prev, { role: 'user', text }]);
-    if (currentQuestion) {
-      setFormData(prev => ({ ...prev, [currentQuestion.id]: text }));
-    }
-  }, [currentQuestion]);
+  }, []);
 
   const detectQuestionIndex = useCallback((transcript: string) => {
     const lower = transcript.toLowerCase();
@@ -155,7 +153,57 @@ export function FeedbackForm({
   }, []);
 
   const onAITranscript = useCallback((text: string) => {
-    setConversation(prev => [...prev, { role: 'ai', text }]);
+    const normalize = (v: string) =>
+      v.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+    const tokenSet = (v: string) =>
+      new Set(
+        normalize(v)
+          .split(' ')
+          .filter(t => t.length > 3)
+      );
+    const overlapRatio = (a: string, b: string) => {
+      const A = tokenSet(a);
+      const B = tokenSet(b);
+      if (!A.size || !B.size) return 0;
+      let common = 0;
+      A.forEach(t => { if (B.has(t)) common += 1; });
+      return common / Math.max(A.size, B.size);
+    };
+
+    // Avoid duplicate AI messages when voice speaks text already shown in chat.
+    setConversation(prev => {
+      const nextText = normalize(text);
+      if (!nextText) return prev;
+
+      const recentAi = prev.filter(m => m.role === 'ai').slice(-4);
+      const hasUserMessage = prev.some(m => m.role === 'user');
+
+      const isDuplicate = recentAi.some(m => {
+        const oldText = normalize(m.text);
+        if (!oldText) return false;
+        if (oldText === nextText) return true;
+        const oldStart = oldText.slice(0, 80);
+        const newStart = nextText.slice(0, 80);
+        if (oldText.includes(newStart) || nextText.includes(oldStart)) return true;
+        // Catch paraphrased duplicates (same follow-up intent, different wording).
+        return overlapRatio(oldText, nextText) >= 0.6;
+      });
+      if (isDuplicate) return prev;
+
+      // Startup case: first question is already visible in chat; voice can read it without re-adding.
+      if (!hasUserMessage) {
+        const firstAi = prev.find(m => m.role === 'ai');
+        const firstText = firstAi ? normalize(firstAi.text) : '';
+        if (firstText) {
+          const firstStart = firstText.slice(0, 80);
+          const nextStart = nextText.slice(0, 80);
+          if (firstText.includes(nextStart) || nextText.includes(firstStart)) {
+            return prev;
+          }
+        }
+      }
+      return [...prev, { role: 'ai', text }];
+    });
     const detected = detectQuestionIndex(text);
     if (detected >= 0) {
       setCurrentStep(prev => Math.max(prev, detected));
@@ -245,9 +293,8 @@ export function FeedbackForm({
     const { status, follow_up, follow_up_audio, transition_text, transition_audio,
             summary, covered_future_indices, structured } = result;
 
-    if (transcript) {
-      setConversation(prev => [...prev, { role: 'user', text: transcript }]);
-    }
+    // Note: User transcript is already added to conversation before API call
+    // We just use 'transcript' here for summary fallback
 
     if (status === 'needs_follow_up' && follow_up) {
       setFollowUpCount(c => c + 1);
@@ -289,15 +336,23 @@ export function FeedbackForm({
     setAiThinking(true);
     setError(null);
 
+    // Add user message to conversation immediately (like voice does)
+    setConversation(prev => [...prev, { role: 'user', text }]);
+    
+    // Clear the text input
+    if (currentQuestion) {
+      setFormData(prev => ({ ...prev, [currentQuestion.id]: '' }));
+    }
+
     try {
       const result = await textSubmit(sessionId, currentStep, text, followUpCount);
-      await handleAnalysis(result, null);
+      await handleAnalysis(result, text);
     } catch (e: any) {
       setError(e.message || 'Something went wrong. Please try again.');
       setIsProcessing(false);
       setAiThinking(false);
     }
-  }, [currentAnswer, sessionId, currentStep, followUpCount, handleAnalysis]);
+  }, [currentAnswer, sessionId, currentStep, followUpCount, handleAnalysis, currentQuestion]);
 
   const handleInputChange = (value: string) => {
     if (!currentQuestion) return;
@@ -451,21 +506,24 @@ export function FeedbackForm({
               )}
               <div className={`max-w-[80%] ${
                 msg.role === 'user' 
-                  ? 'bg-amber-600 text-white' 
+                  ? 'bg-amber-700 text-white' 
                   : msg.isFollowUp 
-                    ? 'bg-amber-50 border border-amber-200 text-amber-900'
+                    ? 'bg-[#FFE4C4] text-[#8B4513] shadow-sm'
                     : msg.isSkip || msg.isTransition
-                      ? 'bg-stone-100 text-stone-600 italic'
+                      ? 'bg-stone-100 text-stone-500 italic text-sm'
                       : 'bg-stone-100 text-stone-800'
-              } rounded-2xl px-4 py-2 text-sm`}>
+              } rounded-2xl px-4 py-3 text-base leading-relaxed`}>
                 {msg.isFollowUp && (
-                  <div className="flex items-center gap-1 text-xs text-amber-700 mb-1">
-                    <MessageSquare className="w-3 h-3" />
-                    <span>Follow-up</span>
+                  <div className="flex items-center gap-1.5 text-xs text-[#A0522D] font-medium mb-1.5 uppercase tracking-wide">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#CD853F] animate-pulse" />
+                    <span>Continue</span>
                   </div>
                 )}
                 {(msg.isSkip || msg.isTransition) && (
-                  <div className="text-xs text-stone-500 mb-1">Skipped</div>
+                  <div className="text-xs text-stone-400 mb-1 flex items-center gap-1">
+                    <span>→</span>
+                    <span>Already covered</span>
+                  </div>
                 )}
                 <p>{msg.text}</p>
               </div>
@@ -504,7 +562,7 @@ export function FeedbackForm({
       {/* Bottom Input Area */}
       <div className="p-4 border-t border-stone-200 bg-[#FFFBF5] shrink-0">
         {/* Voice Input Section */}
-        <div className="flex items-center justify-center gap-3 p-3 bg-stone-100 rounded-xl mb-3">
+        <div className="mb-3">
           <RealtimeVoice
             sessionId={sessionId}
             questionIndex={currentStep}
@@ -515,21 +573,21 @@ export function FeedbackForm({
             onDisconnect={onVoiceDisconnect}
             onError={onVoiceError}
             disabled={isProcessing}
+            isFullscreen={isFullscreen}
           />
         </div>
 
         <Separator className="my-3 bg-stone-200" />
 
-        {/* Text Input */}
+        {/* Text Input - matching reference image */}
         <div className="space-y-2">
-          <div className="relative">
+          <div className="relative flex items-center bg-white border border-stone-300 rounded-2xl px-4 py-3 shadow-sm">
+            <Mic className="w-5 h-5 text-stone-400 mr-3 shrink-0" />
             <Textarea
               value={currentAnswer}
               onChange={(e) => handleInputChange(e.target.value)}
-              placeholder="Or type your response here..."
-              className={`bg-white border-stone-300 resize-none focus:ring-amber-500 focus:border-amber-500 pr-12 ${
-                isFullscreen ? 'min-h-[100px]' : 'min-h-[80px]'
-              }`}
+              placeholder="Type your response..."
+              className="bg-transparent border-0 resize-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 text-base text-stone-800 placeholder:text-stone-400 flex-1 min-h-[24px] max-h-[120px]"
               onKeyDown={(e) => { 
                 if (e.key === 'Enter' && !e.shiftKey) { 
                   e.preventDefault(); 
@@ -537,18 +595,18 @@ export function FeedbackForm({
                 } 
               }}
             />
-            <Button
-              size="sm"
+            <button
               onClick={handleTextSubmit}
               disabled={!currentAnswer.trim() || isProcessing}
-              className="absolute right-2 bottom-2 gap-1 bg-amber-600 hover:bg-amber-700 text-white"
+              className="ml-3 w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-all hover:opacity-90"
+              style={{ backgroundColor: '#B85C14' }}
             >
               {isProcessing ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-4 h-4 text-white animate-spin" />
               ) : (
-                <Send className="w-4 h-4" />
+                <Send className="w-4 h-4 text-white" />
               )}
-            </Button>
+            </button>
           </div>
         </div>
       </div>

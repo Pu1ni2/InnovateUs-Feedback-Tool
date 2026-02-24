@@ -56,6 +56,7 @@ def create_session() -> str:
         "entries": [],
         "completed_qs": set(),
         "covered_ahead": set(),
+        "pending_follow_up": None,
     }
     logger.info("Session created: %s", sid)
     return sid
@@ -126,6 +127,40 @@ def add_voice_turn(sid: str, q_idx: int, role: str, text: str):
                 )
             except Exception as e:
                 logger.warning("ChromaDB voice store failed: %s", e)
+
+
+def set_pending_follow_up(sid: str, q_idx: int, follow_up_text: str):
+    session = _sessions.get(sid)
+    if not session:
+        return
+    cleaned = (follow_up_text or "").strip()
+    if not cleaned:
+        session["pending_follow_up"] = None
+        return
+    session["pending_follow_up"] = {
+        "question_idx": q_idx,
+        "text": cleaned,
+        "ts": time.time(),
+    }
+
+
+def clear_pending_follow_up(sid: str, q_idx: int | None = None):
+    session = _sessions.get(sid)
+    if not session:
+        return
+    pending = session.get("pending_follow_up")
+    if not pending:
+        return
+    if q_idx is None or pending.get("question_idx") == q_idx:
+        session["pending_follow_up"] = None
+
+
+def get_pending_follow_up(sid: str) -> dict[str, Any] | None:
+    session = _sessions.get(sid)
+    if not session:
+        return None
+    pending = session.get("pending_follow_up")
+    return pending if isinstance(pending, dict) else None
 
 
 def build_context_text(sid: str) -> str:

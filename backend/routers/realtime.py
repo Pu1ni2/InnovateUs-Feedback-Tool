@@ -11,6 +11,8 @@ from prompts import MAIN_QUESTIONS, REALTIME_INSTRUCTIONS
 from services.session_manager import (
     add_voice_turn,
     build_context_text,
+    clear_pending_follow_up,
+    get_pending_follow_up,
     get_session,
 )
 
@@ -41,11 +43,14 @@ async def create_realtime_token(body: TokenRequest):
     context = build_context_text(body.session_id)
     session = get_session(body.session_id)
     completed = list(session.get("completed_qs", set())) if session else []
+    pending = get_pending_follow_up(body.session_id) or {}
 
     instructions = REALTIME_INSTRUCTIONS.format(
         conversation_history=context,
         question_index=body.question_index,
         completed_questions=completed if completed else "none yet",
+        pending_follow_up_text=pending.get("text", ""),
+        pending_follow_up_question_index=pending.get("question_idx", -1),
     )
 
     payload = {
@@ -137,4 +142,5 @@ async def sync_transcript(body: SyncRequest):
         add_voice_turn(body.session_id, body.question_index, "ai", body.ai_text)
     if body.user_text:
         add_voice_turn(body.session_id, body.question_index, "user", body.user_text)
+        clear_pending_follow_up(body.session_id, body.question_index)
     return {"ok": True}

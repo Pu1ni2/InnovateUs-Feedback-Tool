@@ -10,8 +10,11 @@ from prompts import MAIN_QUESTIONS, QUESTION_SPOKEN_INTROS
 from services.openai_service import extract_structured
 from services.session_manager import (
     analyze_response,
+    clear_pending_follow_up,
     create_session,
     is_question_covered,
+    set_pending_follow_up,
+    add_voice_turn,
 )
 
 logger = logging.getLogger(__name__)
@@ -76,6 +79,13 @@ async def text_submit(body: dict):
     follow_up_text = analysis.get("follow_up", "")
     summary = analysis.get("summary", "")
     covered_future = analysis.get("covered_future_indices", [])
+
+    # Keep text and voice aligned with one authoritative pending follow-up.
+    if status == "needs_follow_up" and follow_up_text:
+        set_pending_follow_up(session_id, question_index, follow_up_text)
+        add_voice_turn(session_id, question_index, "ai", follow_up_text)
+    else:
+        clear_pending_follow_up(session_id, question_index)
 
     structured = None
     if status in ("done", "move_on", "already_covered"):

@@ -27,6 +27,52 @@ CHROMA_DIR = Path(__file__).resolve().parent.parent / "chroma_data"
 _chroma_client = None
 _collection = None
 
+_TERMINAL_REPLIES = {
+    "nothing",
+    "no",
+    "none",
+    "thats it",
+    "that's it",
+    "no more",
+    "nothing else",
+    "na",
+    "n/a",
+}
+
+
+def _infer_future_coverage_from_text(q_idx: int, full_context: str, latest_response: str) -> list[int]:
+    """
+    Heuristic coverage detection to complement LLM output.
+    Helps skip later questions when earlier answers already include those details.
+    """
+    text = _normalize_text(f"{full_context}\n{latest_response}")
+    covered: set[int] = set()
+
+    outcome_markers = [
+        "outcome", "result", "impact", "changed", "improved",
+        "save time", "saved time", "faster", "quicker", "reduced time",
+        "team responded", "team reaction", "they were happy",
+    ]
+    barrier_markers = [
+        "difficult", "difficulty", "barrier", "constraint", "challenge",
+        "could not", "couldnt", "can't", "cant", "need help",
+        "support", "colleague", "colleagues", "competing priorities",
+    ]
+
+    # If on Q1 and the response already includes outcomes/barriers, mark Q2/Q3 covered.
+    if q_idx == 0:
+        if any(m in text for m in outcome_markers):
+            covered.add(1)
+        if any(m in text for m in barrier_markers):
+            covered.add(2)
+
+    # If on Q2 and barriers are already present, mark Q3 covered.
+    if q_idx == 1:
+        if any(m in text for m in barrier_markers):
+            covered.add(2)
+
+    return sorted(list(covered))
+
 
 def _get_collection():
     global _chroma_client, _collection
@@ -56,6 +102,7 @@ def create_session() -> str:
         "entries": [],
         "completed_qs": set(),
         "covered_ahead": set(),
+        "covered_evidence": {},
         "pending_follow_up": None,
     }
     logger.info("Session created: %s", sid)
@@ -203,6 +250,49 @@ def _clean_json(text: str) -> str:
     return text.strip()
 
 
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (text or "").lower())).strip()
+
+
+def _token_overlap_ratio(a: str, b: str) -> float:
+    a_tokens = {t for t in _normalize_text(a).split() if len(t) > 3}
+    b_tokens = {t for t in _normalize_text(b).split() if len(t) > 3}
+    if not a_tokens or not b_tokens:
+        return 0.0
+    common = len(a_tokens & b_tokens)
+    return common / max(len(a_tokens), len(b_tokens))
+
+
+def _is_terminal_reply(text: str) -> bool:
+    cleaned = _normalize_text(text)
+    if not cleaned:
+        return True
+    if cleaned in _TERMINAL_REPLIES:
+        return True
+    short = cleaned.replace(" ", "")
+    return short in {"nope", "nah", "ok", "okay"}
+
+
+def _recent_question_entries(sid: str, q_idx: int) -> tuple[list[str], list[str]]:
+    """Return (recent_user_texts, recent_ai_texts) for the same question."""
+    session = _sessions.get(sid)
+    if not session:
+        return [], []
+    user_texts: list[str] = []
+    ai_texts: list[str] = []
+    for e in session.get("entries", []):
+        if e.get("question_idx") != q_idx:
+            continue
+        if "role" in e:
+            if e.get("role") == "user":
+                user_texts.append(e.get("text", ""))
+            elif e.get("role") == "ai":
+                ai_texts.append(e.get("text", ""))
+        else:
+            user_texts.append(e.get("response", ""))
+    return user_texts[-3:], ai_texts[-3:]
+
+
 def analyze_response(
     sid: str,
     q_idx: int,
@@ -242,6 +332,48 @@ def analyze_response(
     try:
         result = llm.invoke(messages)
         parsed = json.loads(_clean_json(result.content))
+
+        # Server-side guardrails: prevent repetitive/interrogative follow-up loops.
+        user_recent, ai_recent = _recent_question_entries(sid, q_idx)
+        latest_user_norm = _normalize_text(response)
+
+        repeated_user = any(
+            latest_user_norm and _token_overlap_ratio(response, prev) >= 0.75
+            for prev in user_recent
+        )
+        terminal_user = _is_terminal_reply(response)
+
+        if terminal_user:
+            parsed["status"] = "done"
+            parsed["follow_up"] = ""
+            parsed["reason"] = "User gave a terminal/minimal close response; stop probing."
+        elif repeated_user and parsed.get("status") == "needs_follow_up":
+            parsed["status"] = "done"
+            parsed["follow_up"] = ""
+            parsed["reason"] = "Latest response repeats prior content; avoid repetitive follow-up."
+        elif parsed.get("status") == "needs_follow_up":
+            proposed_follow_up = parsed.get("follow_up", "")
+            repeated_follow_up = any(
+                _token_overlap_ratio(proposed_follow_up, prev_ai) >= 0.65
+                for prev_ai in ai_recent
+            )
+            if repeated_follow_up:
+                parsed["status"] = "move_on"
+                parsed["follow_up"] = ""
+                parsed["reason"] = "Proposed follow-up repeats earlier AI prompt; move on."
+
+        # Q3 barrier rule: once a real barrier exists, allow only one clarifier.
+        if q_idx == 2 and follow_up_count >= 1 and parsed.get("status") == "needs_follow_up":
+            parsed["status"] = "done"
+            parsed["follow_up"] = ""
+            parsed["reason"] = "Barrier identified and one clarifier already asked; stop further probing."
+
+        # Merge heuristic coverage so already-answered later questions get skipped.
+        llm_covered = parsed.get("covered_future_indices", []) or []
+        inferred_covered = _infer_future_coverage_from_text(q_idx, full_context, response)
+        merged_covered = sorted(set(int(i) for i in llm_covered + inferred_covered if isinstance(i, int)))
+        parsed["covered_future_indices"] = merged_covered
+
         logger.info("Analysis for Q%d: status=%s, reason=%s",
                      q_idx + 1, parsed.get("status"), parsed.get("reason", "")[:60])
 
@@ -252,6 +384,12 @@ def analyze_response(
             session = _sessions.get(sid)
             if session:
                 session["covered_ahead"].update(covered)
+                evidence_map = session.get("covered_evidence")
+                if isinstance(evidence_map, dict):
+                    evidence_text = (parsed.get("summary") or response or "").strip()
+                    for idx in covered:
+                        if idx not in evidence_map and evidence_text:
+                            evidence_map[idx] = evidence_text
 
         return parsed
 
@@ -272,3 +410,24 @@ def is_question_covered(sid: str, q_idx: int) -> bool:
     if not session:
         return False
     return q_idx in session.get("covered_ahead", set())
+
+
+def get_coverage_info(sid: str, q_idx: int) -> dict[str, Any]:
+    """Return whether question is covered and best evidence text."""
+    session = _sessions.get(sid)
+    if not session:
+        return {"covered": False, "evidence": ""}
+
+    covered = q_idx in session.get("covered_ahead", set())
+    evidence_map = session.get("covered_evidence", {})
+    evidence = ""
+    if isinstance(evidence_map, dict):
+        evidence = (evidence_map.get(q_idx) or "").strip()
+
+    # Fallback: try semantic memory for this question.
+    if covered and not evidence:
+        similar = check_already_covered(sid, q_idx)
+        if similar:
+            evidence = (similar[0] or "").strip()
+
+    return {"covered": covered, "evidence": evidence}

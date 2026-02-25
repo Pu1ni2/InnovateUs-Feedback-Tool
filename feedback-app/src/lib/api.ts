@@ -43,11 +43,14 @@ export async function textSubmit(sessionId: string, questionIndex: number, respo
 export async function checkCovered(sessionId: string, questionIndex: number) {
   try {
     const r = await fetchWithFallback(`/api/checkin/check-covered/${sessionId}/${questionIndex}`)
-    if (!r.ok) return false
+    if (!r.ok) return { covered: false, evidence: '' }
     const data = await r.json()
-    return data.covered === true
+    return {
+      covered: data.covered === true,
+      evidence: (data.evidence || '').toString(),
+    }
   } catch (_) {
-    return false
+    return { covered: false, evidence: '' }
   }
 }
 

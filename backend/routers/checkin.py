@@ -12,6 +12,8 @@ from services.session_manager import (
     analyze_response,
     clear_pending_follow_up,
     create_session,
+    get_coverage_info,
+    get_session,
     is_question_covered,
     set_pending_follow_up,
     add_voice_turn,
@@ -19,6 +21,35 @@ from services.session_manager import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/checkin", tags=["checkin"])
+
+
+def _normalize_text(text: str) -> str:
+    import re
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (text or "").lower())).strip()
+
+
+def _token_overlap_ratio(a: str, b: str) -> float:
+    a_tokens = {t for t in _normalize_text(a).split() if len(t) > 3}
+    b_tokens = {t for t in _normalize_text(b).split() if len(t) > 3}
+    if not a_tokens or not b_tokens:
+        return 0.0
+    common = len(a_tokens & b_tokens)
+    return common / max(len(a_tokens), len(b_tokens))
+
+
+def _recent_ai_prompts_for_question(session_id: str, question_index: int) -> list[str]:
+    session = get_session(session_id)
+    if not session:
+        return []
+    ai_texts: list[str] = []
+    for e in session.get("entries", []):
+        if e.get("question_idx") != question_index:
+            continue
+        if e.get("role") == "ai":
+            txt = e.get("text", "")
+            if txt:
+                ai_texts.append(txt)
+    return ai_texts[-3:]
 
 
 # ── Session creation ────────────────────────────────────────────────────
@@ -49,8 +80,8 @@ def get_spoken_intros() -> list[str]:
 
 @router.get("/check-covered/{session_id}/{question_index}")
 def check_covered(session_id: str, question_index: int):
-    covered = is_question_covered(session_id, question_index)
-    return {"covered": covered}
+    info = get_coverage_info(session_id, question_index)
+    return {"covered": bool(info.get("covered")), "evidence": info.get("evidence", "")}
 
 
 # ── Text submission ─────────────────────────────────────────────────────
@@ -79,6 +110,20 @@ async def text_submit(body: dict):
     follow_up_text = analysis.get("follow_up", "")
     summary = analysis.get("summary", "")
     covered_future = analysis.get("covered_future_indices", [])
+
+    # Router-level quality gate: reject repeated/generic follow-up prompts.
+    if status == "needs_follow_up" and follow_up_text:
+        recent_ai_prompts = _recent_ai_prompts_for_question(session_id, question_index)
+        overlaps_existing = any(
+            _token_overlap_ratio(follow_up_text, prev) >= 0.65
+            for prev in recent_ai_prompts
+        )
+        if overlaps_existing:
+            status = "move_on"
+            follow_up_text = ""
+            analysis["status"] = "move_on"
+            analysis["follow_up"] = ""
+            analysis["reason"] = "Follow-up overlapped prior prompt; auto move on."
 
     # Keep text and voice aligned with one authoritative pending follow-up.
     if status == "needs_follow_up" and follow_up_text:

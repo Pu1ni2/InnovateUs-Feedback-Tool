@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { Badge } from "@/components/ui/badge";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { 
   Mic, 
@@ -42,6 +42,8 @@ interface Message {
   role: 'ai' | 'user';
   text: string;
   isFollowUp?: boolean;
+  followUpNumber?: number;
+  followUpMax?: number;
   isSkip?: boolean;
   isTransition?: boolean;
 }
@@ -125,7 +127,7 @@ export function FeedbackForm({
   }, []);
 
   const progress = questions.length
-    ? (Math.max(completedQs.size, currentStep) / questions.length) * 100
+    ? (completedQs.size / questions.length) * 100
     : 0;
 
   const currentQuestion = questions[currentStep];
@@ -259,19 +261,53 @@ export function FeedbackForm({
   }, []);
 
   /* ── Text advance/finish ─────────────────────────────── */
-  const advanceOrFinish = useCallback(async (newResults: Result[], coveredFuture: number[] = []) => {
+  const advanceOrFinish = useCallback(async (newResults: Result[], coveredFuture: number[] = [], coverageSourceAnswer: string = '') => {
     setFollowUpCount(0);
+    const sourceAnswer = coverageSourceAnswer || newResults[newResults.length - 1]?.summary || '';
+    const isEvidenceClear = (text: string) => {
+      const cleaned = (text || '').trim();
+      if (!cleaned) return false;
+      return cleaned.split(/\s+/).length >= 7;
+    };
 
     let nextIdx = currentStep + 1;
     while (nextIdx < questions.length) {
-      const isCovered = coveredFuture.includes(nextIdx) || await checkCovered(sessionId, nextIdx);
-      if (!isCovered) break;
+      const coveredByCurrent = coveredFuture.includes(nextIdx);
+      const coverage = coveredByCurrent
+        ? { covered: true, evidence: sourceAnswer }
+        : await checkCovered(sessionId, nextIdx);
+      if (!coverage.covered) break;
+
+      const evidence = (coverage.evidence || sourceAnswer || '').trim();
+      // If previously answered but not clear, do not skip; ask clarification on this question.
+      if (!isEvidenceClear(evidence)) {
+        setCurrentStep(nextIdx);
+        setConversation(prev => [...prev, {
+          role: 'ai',
+          text: `You mentioned this earlier for Question ${nextIdx + 1}: "${questions[nextIdx]?.text || ''}". Could you explain it a bit more with a specific example?`,
+          isFollowUp: true,
+          followUpNumber: 1,
+          followUpMax: MAX_FOLLOWUPS,
+        }]);
+        return;
+      }
+
       setConversation(prev => [...prev, {
         role: 'ai',
-        text: `It sounds like you already covered question ${nextIdx + 1}. Skipping ahead.`,
+        text: `Skipping Question ${nextIdx + 1}: "${questions[nextIdx]?.text || ''}"\nCovered by your earlier answer: "${evidence}"`,
         isSkip: true,
       }]);
       setCompletedQs(prev => { const n = new Set(prev); n.add(nextIdx); return n });
+      // Keep skipped questions visible in results so completion reflects all progress.
+      newResults = [
+        ...newResults,
+        {
+          questionIndex: nextIdx,
+          question: questions[nextIdx]?.text || `Question ${nextIdx + 1}`,
+          summary: evidence || 'Covered in previous response',
+        },
+      ];
+      setResults(newResults);
       nextIdx++;
     }
 
@@ -297,8 +333,15 @@ export function FeedbackForm({
     // We just use 'transcript' here for summary fallback
 
     if (status === 'needs_follow_up' && follow_up) {
-      setFollowUpCount(c => c + 1);
-      setConversation(prev => [...prev, { role: 'ai', text: follow_up, isFollowUp: true }]);
+      const nextFollowUpCount = Math.min(followUpCount + 1, MAX_FOLLOWUPS);
+      setFollowUpCount(nextFollowUpCount);
+      setConversation(prev => [...prev, {
+        role: 'ai',
+        text: follow_up,
+        isFollowUp: true,
+        followUpNumber: nextFollowUpCount,
+        followUpMax: MAX_FOLLOWUPS,
+      }]);
       setIsProcessing(false);
       setAiThinking(false);
       if (follow_up_audio) {
@@ -324,8 +367,8 @@ export function FeedbackForm({
     setResults(newResults);
     setIsProcessing(false);
     setAiThinking(false);
-    await advanceOrFinish(newResults, covered_future_indices || []);
-  }, [results, questions, currentStep, advanceOrFinish]);
+    await advanceOrFinish(newResults, covered_future_indices || [], summary || transcript || '');
+  }, [results, questions, currentStep, followUpCount, advanceOrFinish]);
 
   /* ── Text submit ─────────────────────────────────────── */
   const handleTextSubmit = useCallback(async () => {
@@ -434,14 +477,40 @@ export function FeedbackForm({
   return (
     <div className="flex flex-col h-full bg-[#FFFBF5]">
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-stone-200 bg-[#FFFBF5]/80 backdrop-blur-sm shrink-0">
-        <div className="flex items-center gap-3">
-          <Badge variant="secondary" className="bg-amber-100 text-amber-800">
-            {currentStep + 1} / {questions.length}
-          </Badge>
-          <span className="text-sm text-stone-600 font-medium">
-            InnovateUS Check-In
-          </span>
+      <div className="relative flex items-center justify-between p-4 border-b border-stone-200 bg-[#FFFBF5]/80 backdrop-blur-sm shrink-0">
+        <div className="flex items-center">
+          <span className="text-sm text-stone-600 font-medium">InnovateUS Check-In</span>
+        </div>
+
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center">
+          {questions.map((q, idx) => {
+            const isDone = completedQs.has(idx);
+            const isCurrent = !isDone && idx === currentStep;
+            const isConnectorDone = completedQs.has(idx);
+
+            return (
+              <div key={q.id} className="flex items-center">
+                <div
+                  className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-xs font-semibold transition-all duration-300 ${
+                    isDone
+                      ? 'bg-amber-600 border-amber-600 text-white'
+                      : isCurrent
+                        ? 'bg-white border-amber-500 text-amber-700'
+                        : 'bg-white border-stone-300 text-stone-500'
+                  }`}
+                >
+                  {idx + 1}
+                </div>
+                {idx < questions.length - 1 && (
+                  <div
+                    className={`w-6 h-[2px] mx-1 transition-all duration-300 ${
+                      isConnectorDone ? 'bg-amber-500' : 'bg-stone-300'
+                    }`}
+                  />
+                )}
+              </div>
+            );
+          })}
         </div>
         
         <div className="flex items-center gap-2">
@@ -516,7 +585,9 @@ export function FeedbackForm({
                 {msg.isFollowUp && (
                   <div className="flex items-center gap-1.5 text-xs text-[#A0522D] font-medium mb-1.5 uppercase tracking-wide">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#CD853F] animate-pulse" />
-                    <span>Continue</span>
+                    <span>
+                      Follow-up {msg.followUpNumber || 1} of {msg.followUpMax || MAX_FOLLOWUPS}
+                    </span>
                   </div>
                 )}
                 {(msg.isSkip || msg.isTransition) && (

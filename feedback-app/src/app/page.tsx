@@ -77,7 +77,7 @@ export default function Home() {
 
       {/* Hero Section - hidden when focused */}
       {!focusedMode && (
-        <section className="relative pt-20 pb-10 px-4">
+        <section className="relative pt-20 pb-3 px-4">
           <div className="max-w-4xl mx-auto text-center">
             <AnimatePresence>
               {userName && (
@@ -116,6 +116,23 @@ export default function Home() {
             </motion.p>
 
             <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
+              className="mt-8 flex flex-wrap items-center justify-center gap-3"
+            >
+              <span className="px-4 py-1.5 rounded-full text-sm font-semibold bg-emerald-100 text-emerald-700">
+                Anonymous responses
+              </span>
+              <span className="px-4 py-1.5 rounded-full text-sm font-semibold bg-blue-100 text-blue-700">
+                Voice + Text support
+              </span>
+              <span className="px-4 py-1.5 rounded-full text-sm font-semibold bg-amber-100 text-amber-700">
+                3-minute check-in
+              </span>
+            </motion.div>
+
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.5 }}
@@ -142,10 +159,10 @@ export default function Home() {
           titleComponent={
             !focusedMode && (
               <div className="mb-8 md:mb-12">
-                <h2 className="text-2xl md:text-3xl font-medium text-stone-800 mb-2">
+                <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-stone-900 mb-2">
                   Share Your Experience
                 </h2>
-                <p className="text-stone-600">
+                <p className="text-base md:text-lg text-stone-600 font-medium tracking-wide">
                   Your feedback helps improve future training programs
                 </p>
               </div>
